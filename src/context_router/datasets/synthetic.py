@@ -362,7 +362,13 @@ def _query_text(
     if query_type == "cross_context":
         left = blueprint_by_key[target_keys[0]]
         right = blueprint_by_key[target_keys[1]]
-        return f"把 {left.name} 的 {left.entities[2]} 思路用到 {right.name} 上，可行吗？"
+        left_topic = topics.get(left.key, left.subtopics[0])
+        right_topic = topics.get(right.key, right.subtopics[0])
+        # Both halves must name what is wanted from them. Naming only the context would
+        # make the labelled evidence unanswerable: every episode of a context shares the
+        # same anchor file and marker, so nothing in the query would distinguish the
+        # labelled episode from its siblings.
+        return f"把 {left.name} 的{left_topic}思路用到 {right.name} 的{right_topic}上，可行吗？"
     target = blueprint_by_key[target_keys[0]]
     topic = topics.get(target.key, target.subtopics[0])
     if query_type == "return":

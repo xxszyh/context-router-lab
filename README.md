@@ -105,13 +105,13 @@ comparable.
 | Arm | Mean memory tokens | Median | vs Full history | Evidence recall | Future leakage |
 |---|---:|---:|---:|---:|---:|
 | `query_recent_only` | 135.5 | 138.0 | 95.4% | 0.462 | 0 |
-| `full_history` | 2 968.7 | 2 920.5 | 0.0% | 1.000 | 0 |
-| `sliding_window` | 335.5 | 334.0 | 88.7% | 0.538 | 0 |
-| `summary_recent` | 221.3 | 236.0 | 92.5% | 0.462 | 0 |
-| `global_bm25` | 773.0 | 793.5 | 74.0% | 1.000 | 0 |
-| `global_dense` | 789.7 | 821.5 | 73.4% | 0.923 | 0 |
-| `global_hybrid` | 789.2 | 807.5 | 73.4% | 0.949 | 0 |
-| `hybrid_router` | 912.9 | 779.5 | 69.2% | 0.974 | 0 |
+| `full_history` | 2 976.9 | 2 928.0 | 0.0% | 1.000 | 0 |
+| `sliding_window` | 336.7 | 335.0 | 88.7% | 0.538 | 0 |
+| `summary_recent` | 221.3 | 236.0 | 92.6% | 0.462 | 0 |
+| `global_bm25` | 749.7 | 775.0 | 74.8% | 1.000 | 0 |
+| `global_dense` | 779.5 | 810.0 | 73.8% | 0.949 | 0 |
+| `global_hybrid` | 779.9 | 804.0 | 73.8% | 0.974 | 0 |
+| `hybrid_router` | 915.4 | 779.5 | 69.3% | 1.000 | 0 |
 | `oracle_router` | 603.4 | 560.0 | **79.7%** | 1.000 | 0 |
 
 Measured on the 780-checkpoint synthetic dataset at a 2 048-token budget, with the
@@ -140,23 +140,36 @@ against a pinned main model and is reported as unverified rather than assumed.
   can go while keeping every evidence set. So selective context assembly is worth
   building — gate one passes on substance, not on a technicality.
 
-A third signal sits in the dense rows: `global_dense` (0.923) and `global_hybrid`
-(0.949) land *below* `global_bm25` (1.000), so fusing the embedding in actively hurts.
+A third signal sits in the dense rows: `global_dense` (0.949) and `global_hybrid`
+(0.974) still land *below* `global_bm25` (1.000), so fusing the embedding in still hurts.
 That is measured evidence that the default hashing embedder carries no semantics — see
 limitation 2 below — and it means the dense and hybrid arms should not be read as
 dense-retrieval results at all.
 
-### Out-of-sample: the configured router matches BM25
+### Out-of-sample: matching recall, not yet matching cost
 
-The default row above is not the router's ceiling. With a ranker trained on sessions
-0–35 and a policy tuned on sessions 36–47, scored on the disjoint sessions 48–59:
+The router now matches BM25's evidence recall. It does **not** yet match its token cost,
+and that gap is the honest headline. With a ranker trained on sessions 0–35 and a policy
+tuned on sessions 36–47, scored on the disjoint sessions 48–59:
 
 | Arm on the held-out split | Evidence recall | Mean memory tokens |
 |---|---:|---:|
-| `hybrid_router`, default | 0.974 | 913 |
-| `hybrid_router`, trained + tuned | **1.000** | **780** |
-| `global_bm25` | 1.000 | 773 |
+| `hybrid_router`, default | 1.000 | 915 |
+| `hybrid_router`, trained + tuned | 1.000 | **838** |
+| `global_bm25` | 1.000 | **750** |
 | `oracle_router` | 1.000 | 603 |
+
+Read it for what it says: the router and BM25 both recover every labelled evidence set,
+but the router spends **12–22% more tokens** to do it, and the oracle shows that roughly
+four fifths of a saving is still available (603 vs 915 tokens). The project's whole claim
+is "same answer quality for fewer tokens", and right now the router delivers the same
+quality for *more* tokens. That is progress from being dominated outright, and it is not
+yet the result the plan set out to prove.
+
+The gate-two operating constraints are closer too. On the dev split the tuned policy
+reaches a high-confidence error rate of 0.013 (target ≤ 0.02) and cross-context recall of
+0.958 (target ≥ 0.90), but required-context recall of 0.840 against a target of 0.95 — so
+gate two is **not** passed.
 
 ```bash
 ctxlab generate-synthetic run/train --sessions 36 --session-start 0
@@ -193,11 +206,30 @@ hidden:
    contexts in `recent_context_ids` for `switch_or_return`, but a return target is by
    construction not recently used, so the feature rewarded the answer's opposite.
 
-Fixing 1–2 took the router from 0.731 to 0.831; fixing 3–4 took it to 0.977 in-sample and
-1.000 out-of-sample. The general lesson, and the reason the harness now measures this: a
-benchmark whose budget never binds and whose sessions are too short cannot tell a broken
-router from a working one. **All four defects were invisible until the dataset was
-widened.**
+Fixing 1–2 took the router from 0.731 to 0.831; fixing 3–4 took it to 0.977.
+
+Chasing the last 2.7% found two more, and the second was **not in the system at all**:
+
+5. **The Builder spent the budget in global evidence order.** Admitting groups by score
+   let one context's long tail exhaust the tokens before another *selected* context
+   contributed anything, so a correct multi-context decision could still lose the answer
+   it routed for. Evidence groups are now round-robined across contexts, each context's
+   best group first. This is what "minimal sufficient" has to mean once more than one
+   context is in play, and it halved the residual (10 → 5 of 330).
+6. **The label was unanswerable, not the system wrong.** The remaining 5 were all
+   `cross_context`, and all failed for one reason: the query named its two contexts
+   ("把 Context Router 的 RRF 思路用到 SQLite migration 上") while the labelled evidence
+   was one specific episode of each — but every episode of a context shares the same
+   anchor file and marker, so **nothing in the query distinguished the labelled episode
+   from its siblings**. No retrieval system could have found it. The generator now names
+   what it wants from each side. This took the residual to **0 of 330**.
+
+The general lesson, and the reason the harness now measures this: a benchmark whose budget
+never binds and whose sessions are too short cannot tell a broken router from a working
+one. **Defects 1–4 were invisible until the dataset was widened, and 6 was invisible until
+the evidence layer was instrumented.** A benchmark bug and a system bug look identical
+from the score alone, so the diagnostic loop classifies every failure by the layer that
+dropped the evidence instead of reporting a single number.
 
 ## Scope of Phase 0–1
 
@@ -228,11 +260,12 @@ any Codex/MCP integration.
    `unknown` rather than guessed — that case is what the plan reserves a small model for,
    and `tests/test_relation.py` pins the behaviour so a later rule change cannot silently
    overreach.
-4. **A residue of within-context retrieval failures remains.** After the routing fixes,
-   the only failures left in the diagnostic loop are cases where the correct contexts are
-   selected but the token budget or the within-context ranking drops the evidence
-   (3 of 110 answerable checkpoints in the diagnostic sample). That layer has not been
-   examined yet.
+4. **A clean diagnostic sample is not a clean system.** The diagnostic loop now reports
+   0 lost evidence sets out of 330 answerable checkpoints, but that is a sample of a
+   synthetic benchmark whose labels the generator itself writes. The measured token gap
+   against `global_bm25` (838 vs 750 out of sample, against the oracle's 603) is the real
+   outstanding defect, and this benchmark has already proven capable of hiding four
+   defects at once — so read a clean score as "nothing left to see here", not "correct".
 5. **The synthetic sessions are still templated.** Six interleaved contexts, evidence up
    to 17 events behind the checkpoint, tool call/result pairs, cross-context and
    unresolvable checkpoints are all covered. Not yet covered, from the plan's harder-case
@@ -301,13 +334,19 @@ Apache-2.0. See [LICENSE](LICENSE).
 2. **Oracle 以很大余量证明架构成立**：省 79.7% 且证据召回一条不丢，第一道门槛通过。
 
 **Router 曾经被最朴素的 BM25 全面压过**（召回 0.744 vs 1.000，token 还更多）。那 0.744
-是真的，但从它得出的结论是错的：诊断后定位到四个缺陷——关系规则太窄、`unknown` 被当成
-确信而收窄到单一上下文、**近期窗口被拼进检索 query**（最大元凶，正是计划警告的"上下文
-黏滞"）、以及 `relation_match` 反而奖励"正在离开的上下文"。修完后 Router 在**留出的
-测试会话**上取得 **召回 1.000 / 780 token**，与 `global_bm25`（1.000 / 773）基本持平，
-另附 BM25 没有的上下文选择、关系标签、弃答决策与路由轨迹。**这四个缺陷在数据集加宽前
-全部不可见。**
+是真的，但从它得出的结论是错的。逐层诊断后定位到**六个**缺陷：关系规则太窄、`unknown`
+被当成确信而收窄到单一上下文、**近期窗口被拼进检索 query**（最大元凶，正是计划警告的
+"上下文黏滞"）、`relation_match` 反而奖励"正在离开的上下文"、**Builder 按全局得分顺序
+花预算**（一个上下文的长尾能挤掉另一个*已选中*上下文的唯一证据）、以及最后 5 例的真凶
+**竟是标签本身不可回答**——query 只写了两个 Context 的名字，而每个 episode 都共用同一个
+anchor 文件与标记，query 里**没有任何线索能区分被标注的那个 episode**，换成任何系统都
+检索不到。六项修完后残差 **0/330**。
 
-另外 `global_dense`(0.923) 与 `global_hybrid`(0.949) **低于** `global_bm25`(1.000)，
-这正是默认哈希嵌入器不含语义的直接证据：融合进去反而变差。答案质量尚未测量——必须
-先固定主模型才能下结论。
+修完后 Router 在留出的测试会话上**召回追平 BM25（都是 1.000）**，但**token 仍贵 12–22%**
+（838–915 vs 750），而 Oracle 的 603 说明还有约五分之四的节省空间没拿到。**项目的命题是
+"同等质量、更少 token"，目前做到的是同等质量、更多 token**——这比被全面压过是进步，但
+还不是计划要证明的结果。第二道门槛也未通过：dev 上高置信错误率 0.013 ✓、跨上下文召回
+0.958 ✓，但 required-context 召回 0.840 < 0.95。
+
+另外 `global_dense`(0.949) 与 `global_hybrid`(0.974) 仍**低于** `global_bm25`(1.000)，
+这是默认哈希嵌入器不含语义的直接证据。答案质量尚未测量——必须先固定主模型才能下结论。

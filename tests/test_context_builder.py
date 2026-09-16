@@ -134,6 +134,86 @@ def test_builder_keeps_tool_call_and_result_atomic() -> None:
     assert "OperationalError: SQLITE_BUSY" in working.rendered_text
 
 
+def plot_context() -> FlatContext:
+    return FlatContext(
+        context_id="ctx-plot",
+        name="Plot rendering",
+        goal="修复论文图例",
+        summary="plot.py 的 legend 遮挡坐标轴",
+        entities=["plot.py", "legend"],
+        lexical_terms=["matplotlib"],
+        status="active",
+        created_at_event="evt-1",
+        last_active_sequence=4,
+        version=1,
+    )
+
+
+def plot_assignment(event_id: str) -> EventContextAssignment:
+    return EventContextAssignment(
+        event_id=event_id,
+        context_id="ctx-plot",
+        source="oracle",
+        relevance=1.0,
+        annotation_version=1,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+
+def two_context_decision() -> RouteDecision:
+    return RouteDecision(
+        decision="route",
+        relation="cross_context",
+        relation_probabilities={"cross_context": 1.0},
+        candidates=[],
+        selected_context_ids=["ctx-db", "ctx-plot"],
+        confidence=0.95,
+        fallback_level=0,
+        trace_id="trace-2",
+        index_version="index-1",
+        model_versions={},
+    )
+
+
+def test_every_selected_context_gets_evidence_before_any_context_gets_depth() -> None:
+    """A tight budget must be shared across selected contexts, not spent in rank order.
+
+    A cross-context query needs evidence from both contexts. Ranking every candidate
+    event globally and admitting them while tokens remain lets one context's long tail
+    crowd out the other context's only evidence, which is how a correct routing decision
+    still loses the answer. A minimal sufficient context must cover each selected context
+    before deepening any of them.
+    """
+
+    database_events = [
+        event(f"db-{index}", index, "SQLITE_BUSY SQLITE_BUSY 事务范围 细节确认")
+        for index in range(1, 9)
+    ]
+    plot_events = [event("plot-1", 9, "legend 结论确定"), event("plot-2", 10, "legend 复核完成")]
+    request = AssemblyRequest(
+        query="SQLITE_BUSY SQLITE_BUSY 事务范围，另外 legend 的结论呢？",
+        recent_events=[],
+        event_pool=[*database_events, *plot_events],
+        context_catalog=[context(), plot_context()],
+        assignments=[
+            *(assignment(item.event_id) for item in database_events),
+            *(plot_assignment(item.event_id) for item in plot_events),
+        ],
+        as_of_sequence=10,
+        token_budget=200,
+    )
+
+    working = assemble_context(request, two_context_decision())
+
+    assert "legend 结论确定" in working.rendered_text
+    assert {"plot-1", "plot-2"} <= set(working.included_event_ids)
+    database_included = [i for i in working.included_event_ids if i.startswith("db-")]
+    plot_included = [i for i in working.included_event_ids if i.startswith("plot-")]
+    assert database_included, "the first context must still contribute evidence"
+    assert len(plot_included) == len(plot_events)
+    assert working.memory_tokens <= 200
+
+
 def test_builder_never_breaks_its_memory_budget_or_truncates_an_event() -> None:
     events = [
         event(f"evt-{index}", index, f"完整事件-{index} " + "细节 " * 20) for index in range(1, 8)

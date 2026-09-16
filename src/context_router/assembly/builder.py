@@ -21,6 +21,13 @@ _TOKEN_PATTERN = re.compile(
     r"[\u3400-\u4dbf\u4e00-\u9fff]|[A-Za-z_][A-Za-z0-9_./\\:-]*|\d+(?:\.\d+)*|[^\s]"
 )
 
+#: How evidence events are ranked inside a selected context, named so the profile can be
+#: swept rather than guessed at. Moving weight off `dense` and onto `lexical` was measured
+#: and made no difference on the current benchmark, so these are the untuned defaults, not
+#: a settled choice: the dense channel is only as semantic as its embedding provider, and
+#: the default provider is a hashing placeholder.
+EVIDENCE_WEIGHTS = {"lexical": 0.45, "dense": 0.40, "relevance": 0.15}
+
 
 class TokenCounter:
     """Deterministic model-neutral token estimate used for comparable experiments."""
@@ -44,6 +51,28 @@ class _EventGroup:
     events: tuple[RawEvent, ...]
     context_id: str
     score: float
+
+
+def _interleave_by_context(groups: list[_EventGroup]) -> list[_EventGroup]:
+    """Round-robin evidence groups across contexts, each context's best group first.
+
+    Admitting groups in global score order lets one context's long tail exhaust the
+    budget before another selected context contributes anything, so a *correct*
+    multi-context routing decision can still lose the answer it routed for. Covering
+    every selected context before deepening any one of them is what "minimal sufficient"
+    has to mean once more than one context is in play.
+    """
+
+    buckets: dict[str, list[_EventGroup]] = {}
+    for group in groups:
+        buckets.setdefault(group.context_id, []).append(group)
+    ordered: list[_EventGroup] = []
+    depth = max((len(bucket) for bucket in buckets.values()), default=0)
+    for rank in range(depth):
+        for bucket in buckets.values():
+            if rank < len(bucket):
+                ordered.append(bucket[rank])
+    return ordered
 
 
 class ContextBuilder:
@@ -131,7 +160,7 @@ class ContextBuilder:
         already_selected = {
             block.event.event_id for block in selected_blocks if block.event is not None
         }
-        for group in evidence_groups:
+        for group in _interleave_by_context(evidence_groups):
             group_blocks = [
                 self._event_block(event, "evidence", group.context_id)
                 for event in group.events
@@ -237,11 +266,12 @@ class ContextBuilder:
             }
             max_bm25 = max(bm25.values(), default=1.0) or 1.0
             max_dense = max(dense.values(), default=1.0) or 1.0
+            weights = EVIDENCE_WEIGHTS
             for event_id in event_ids:
                 scores[(event_id, context_id)] = (
-                    0.45 * bm25[event_id] / max_bm25
-                    + 0.40 * dense[event_id] / max_dense
-                    + 0.15 * relevance_by_pair.get((event_id, context_id), 0.0)
+                    weights["lexical"] * bm25[event_id] / max_bm25
+                    + weights["dense"] * dense[event_id] / max_dense
+                    + weights["relevance"] * relevance_by_pair.get((event_id, context_id), 0.0)
                 )
 
         ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
