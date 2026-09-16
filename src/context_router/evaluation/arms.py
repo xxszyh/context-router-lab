@@ -100,6 +100,7 @@ class ArmCase(Contract):
     session_id: str
     query_event_id: str
     query: str
+    query_type: str = "continue"
     as_of_sequence: int = Field(ge=0)
     events: list[RawEvent]
     future_events: list[RawEvent] = Field(default_factory=list)
@@ -318,6 +319,7 @@ def build_arm_cases(
                 session_id=sample.session_id,
                 query_event_id=sample.query_event_id,
                 query=query_event.content,
+                query_type=sample.query_type,
                 as_of_sequence=sample.as_of_sequence,
                 events=causal,
                 future_events=future,

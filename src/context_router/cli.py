@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import asdict
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import typer
 
@@ -18,15 +19,23 @@ from context_router.domain import (
 )
 from context_router.evaluation import (
     ARM_NAMES,
+    AnswerRecord,
+    ArmCase,
+    ArmName,
     RouteCaseResult,
+    answer_one,
+    build_answer_cases,
     build_arm_cases,
     describe_router,
+    evaluate_answers,
     evaluate_arms,
     evaluate_routes,
     first_gate,
+    quality_token_frontier,
     run_arm,
 )
 from context_router.providers import HashEmbeddingProvider
+from context_router.providers.anthropic import AnthropicCompatibleAnswerProvider
 from context_router.routing import ContextRouter
 from context_router.routing.calibration import PlattContextRanker
 from context_router.routing.policy import PolicyObservation, SelectionPolicyTuner
@@ -178,6 +187,129 @@ def assemble_command(
         token_budget=token_budget,
     )
     typer.echo(assemble_context(assembly_request, route_decision).model_dump_json(indent=2))
+
+
+def _stratified_sample(cases: list[ArmCase], limit: int) -> list[ArmCase]:
+    """Round-robin across query types so a small run still covers every kind of request.
+
+    Taking the first N checkpoints would be deterministic but would cover the query cycle
+    once and a half, and taking every k-th would cover the same phase of it every time,
+    since each session runs the same cycle. Sampling across types is what makes a 20-
+    checkpoint run informative rather than merely cheap.
+    """
+
+    if limit >= len(cases):
+        return list(cases)
+    buckets: dict[str, list[ArmCase]] = {}
+    for case in cases:
+        buckets.setdefault(case.query_type, []).append(case)
+    # Spread within each type as well as across types. Taking each bucket from the front
+    # would balance the query types while quietly drawing every one of them from the first
+    # few sessions.
+    per_type = max(1, limit // len(buckets)) + 1
+    spread: dict[str, list[ArmCase]] = {}
+    for key, bucket in buckets.items():
+        take = min(per_type, len(bucket))
+        if take <= 1:
+            spread[key] = list(bucket)
+            continue
+        step = (len(bucket) - 1) / (take - 1)
+        spread[key] = [bucket[round(index * step)] for index in range(take)]
+    sampled: list[ArmCase] = []
+    depth = 0
+    while len(sampled) < limit:
+        progressed = False
+        for bucket in spread.values():
+            if depth < len(bucket) and len(sampled) < limit:
+                sampled.append(bucket[depth])
+                progressed = True
+        if not progressed:
+            break
+        depth += 1
+    return sampled
+
+
+@app.command("answer-experiment")
+def answer_experiment_command(
+    database: Annotated[Path, typer.Argument()],
+    benchmark: Annotated[Path, typer.Argument()],
+    output: Annotated[Path, typer.Argument()],
+    arms: Annotated[str, typer.Option(help="Comma-separated arm names")] = (
+        "query_recent_only,hybrid_router,oracle_router"
+    ),
+    limit: Annotated[int, typer.Option(min=1, help="Checkpoints per arm")] = 20,
+    model: Annotated[str | None, typer.Option(help="Pinned model id")] = None,
+    base_url: Annotated[str | None, typer.Option(help="Endpoint base url")] = None,
+    auth_style: Annotated[str, typer.Option(help="bearer or x-api-key")] = "bearer",
+    max_tokens: Annotated[int, typer.Option(min=64)] = 800,
+    token_budget: Annotated[int, typer.Option(min=32)] = 2048,
+    ranker_file: Annotated[Path | None, typer.Option()] = None,
+    policy_file: Annotated[Path | None, typer.Option()] = None,
+) -> None:
+    """Ask a real main model to answer each arm's memory, and score what comes back.
+
+    The credential is read from the environment (ANTHROPIC_AUTH_TOKEN by default) and is
+    deliberately not a command-line option: flags land in shell history and in the process
+    list, and a research harness should not be the reason a key leaks.
+    """
+
+    api_key = os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
+    resolved_base = base_url or os.environ.get("ANTHROPIC_BASE_URL", "")
+    resolved_model = model or os.environ.get("ANTHROPIC_MODEL", "")
+    if not (api_key and resolved_base and resolved_model):
+        raise typer.BadParameter(
+            "need ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL and a pinned model "
+            "(env or --model/--base-url)"
+        )
+    provider = AnthropicCompatibleAnswerProvider(
+        base_url=resolved_base,
+        api_key=api_key,
+        model=resolved_model,
+        auth_style=auth_style,  # type: ignore[arg-type]
+        max_tokens=max_tokens,
+    )
+    store = SQLiteEventStore(database)
+    cases = _stratified_sample(
+        build_answer_cases(store, _read_benchmark(benchmark), budget=token_budget), limit
+    )
+    ranker = PlattContextRanker.load(ranker_file) if ranker_file else None
+    policy = RoutingPolicy(**json.loads(policy_file.read_text())) if policy_file else None
+    router = ContextRouter(ranker=ranker, policy=policy)
+    chosen = [name.strip() for name in arms.split(",") if name.strip()]
+    typer.echo(
+        f"{len(chosen)} arms x {len(cases)} checkpoints = {len(chosen) * len(cases)} calls; "
+        f"model={resolved_model} max_tokens={max_tokens}"
+    )
+    records: list[AnswerRecord] = []
+    for index, case in enumerate(cases, start=1):
+        for name in chosen:
+            try:
+                record = answer_one(case, cast(ArmName, name), provider, router=router)
+            except Exception as error:  # noqa: BLE001 - one failed call must not lose the run
+                typer.echo(f"  [{index}/{len(cases)}] {name} FAILED: {type(error).__name__}")
+                continue
+            records.append(record)
+            typer.echo(
+                f"  [{index}/{len(cases)}] {name:<18} mem={record.memory_tokens:>5} "
+                f"in={record.input_tokens:>5} out={record.output_tokens:>5} "
+                f"cov={record.coverage:.2f}{' TRUNCATED' if record.truncated else ''}"
+            )
+    if not records:
+        raise typer.BadParameter("no answer records were produced")
+    summary = evaluate_answers(records)
+    payload = {
+        "schema_version": "1.0",
+        "model": resolved_model,
+        "max_tokens": max_tokens,
+        "token_budget": token_budget,
+        "arms": chosen,
+        "checkpoints": len(cases),
+        "summary": summary,
+        "frontier": [point.__dict__ for point in quality_token_frontier(summary)],
+        "records": [record.model_dump(mode="json") for record in records],
+    }
+    _write_json(output, payload)
+    typer.echo(str(output))
 
 
 @app.command("benchmark")
