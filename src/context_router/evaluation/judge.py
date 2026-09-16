@@ -116,6 +116,12 @@ _LABELLED = re.compile(r"\b(?:winner|verdict)\b\s*[:：]\s*[\"']?(a|b|tie)\b", r
 _BARE = re.compile(r"^\s*[\"']?(a|b|tie)[\"']?\s*[.!]?\s*$", re.I)
 
 
+#: Fires on a reply cut off mid-JSON, where the object will not load whole but the winner
+#: field is already on the wire. Anchored on the field name so it cannot fire on prose,
+#: which matters because a spurious "a" is worse than an honest tie.
+_TRUNCATED = re.compile(r"[\"']?winner[\"']?\s*[:：]\s*[\"']?(a|b|tie)\b", re.I)
+
+
 def parse_verdict(text: str) -> Verdict | None:
     """Recover the winner from a judge reply, tolerating fences and surrounding prose.
 
@@ -132,6 +138,9 @@ def parse_verdict(text: str) -> Verdict | None:
         winner = str(payload.get("winner", "")).strip().lower()
         if winner in ("a", "b", "tie"):
             return cast(Verdict, winner)
+    truncated = _TRUNCATED.search(text)
+    if truncated:
+        return cast(Verdict, truncated.group(1).lower())
     labelled = _LABELLED.search(text)
     if labelled:
         return cast(Verdict, labelled.group(1).lower())
@@ -154,6 +163,9 @@ class LLMJudge:
         self.parse_failures = 0
         self.input_tokens = 0
         self.output_tokens = 0
+        #: Raw replies, kept because the first judge run lost 14 of 40 to unreadable output
+        #: and there was no way to find out what they said without paying for them again.
+        self.replies: list[str] = []
 
     def compare(
         self, *, query: str, requirements: list[str], answer_a: str, answer_b: str
@@ -164,6 +176,7 @@ class LLMJudge:
         result = self.model.run(prompt=prompt, instructions=JUDGE_INSTRUCTIONS)
         self.input_tokens += result.input_tokens
         self.output_tokens += result.output_tokens
+        self.replies.append(result.text)
         verdict = parse_verdict(result.text)
         if verdict is None:
             self.parse_failures += 1

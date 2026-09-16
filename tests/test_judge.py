@@ -234,3 +234,28 @@ def test_the_llm_judge_forwards_the_blinded_prompt_and_accumulates_usage() -> No
     assert "hybrid_router" not in model.prompts[0]
     assert judge.input_tokens == 10
     assert judge.output_tokens == 5
+
+
+def test_a_reply_cut_off_mid_json_still_yields_its_winner() -> None:
+    """Output caps truncate JSON. The winner is already on the wire, so read it.
+
+    Anchored on the field name: a reply that merely mentions "a" or "b" in prose must not
+    be read as a verdict, because a spurious winner is worse than an honest tie.
+    """
+
+    assert parse_verdict('{"winner":"a","reason":"the answer is a bit long and then it sto') == "a"
+    assert parse_verdict('{"winner": "b", "reason": ') == "b"
+    assert parse_verdict("Answer A mentions the file, answer B does not.") is None
+
+
+def test_unparseable_replies_are_kept_for_diagnosis() -> None:
+    """The first judge run lost 14 of 40 replies with no way to see what they said."""
+
+    model = _ScriptedModel(["garbage one", '{"winner": "a", "reason": "x"}'])
+    judge = LLMJudge(model)
+
+    judge.compare(query="q", requirements=["r"], answer_a="A", answer_b="B")
+    judge.compare(query="q", requirements=["r"], answer_a="A", answer_b="B")
+
+    assert judge.replies == ["garbage one", '{"winner": "a", "reason": "x"}']
+    assert judge.parse_failures == 1
