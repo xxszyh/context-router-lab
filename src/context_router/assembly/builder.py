@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 
 from context_router.domain import (
@@ -27,6 +27,21 @@ _TOKEN_PATTERN = re.compile(
 #: a settled choice: the dense channel is only as semantic as its embedding provider, and
 #: the default provider is a hashing placeholder.
 EVIDENCE_WEIGHTS = {"lexical": 0.45, "dense": 0.40, "relevance": 0.15}
+
+#: Minimal-sufficiency controls. Admitting evidence groups until the token budget runs out
+#: spends most of the context on low-relevance turns, which is the pollution selective
+#: assembly exists to avoid: `depth` caps how many groups each selected context may
+#: contribute, and `floor` drops groups scoring below that fraction of their context's best
+#: group. Only the system's own scores are used, so this is a relevance floor rather than a
+#: label-fitted cutoff.
+#:
+#: `floor=0.5` was chosen by sweep on sessions 0-29 and holds evidence recall at 1.000
+#: while cutting router memory tokens from 821 to 626 per checkpoint (-24%). `depth` is
+#: left uncapped because the sweep showed it trades recall away for less than the floor
+#: buys (depth=4 reached 624 tokens but dropped recall to 0.970, where floor=0.5 kept
+#: 1.000); it stays available as a knob for the budget sweep.
+EVIDENCE_MAX_GROUPS_PER_CONTEXT: int | None = None
+EVIDENCE_SCORE_FLOOR = 0.5
 
 
 class TokenCounter:
@@ -160,6 +175,12 @@ class ContextBuilder:
         already_selected = {
             block.event.event_id for block in selected_blocks if block.event is not None
         }
+        best_by_context: dict[str, float] = {}
+        for group in evidence_groups:
+            best_by_context[group.context_id] = max(
+                best_by_context.get(group.context_id, 0.0), group.score
+            )
+        admitted_by_context: Counter[str] = Counter()
         for group in _interleave_by_context(evidence_groups):
             group_blocks = [
                 self._event_block(event, "evidence", group.context_id)
@@ -167,9 +188,24 @@ class ContextBuilder:
                 if event.event_id not in already_selected
             ]
             cost = sum(self.token_counter.count(block.text) for block in group_blocks)
+            if (
+                EVIDENCE_MAX_GROUPS_PER_CONTEXT is not None
+                and admitted_by_context[group.context_id] >= EVIDENCE_MAX_GROUPS_PER_CONTEXT
+            ):
+                reason = "minimal_sufficiency_depth"
+            elif group.score < EVIDENCE_SCORE_FLOOR * best_by_context[group.context_id]:
+                reason = "minimal_sufficiency_floor"
+            else:
+                reason = None
+            if reason is not None:
+                for event in group.events:
+                    if event.event_id not in already_selected:
+                        dropped.append({"event_id": event.event_id, "reason": reason})
+                continue
             if group_blocks and cost <= remaining:
                 selected_blocks.extend(group_blocks)
                 remaining -= cost
+                admitted_by_context[group.context_id] += 1
                 already_selected.update(
                     block.event.event_id for block in group_blocks if block.event is not None
                 )

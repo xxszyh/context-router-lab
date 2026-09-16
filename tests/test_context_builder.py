@@ -214,6 +214,60 @@ def test_every_selected_context_gets_evidence_before_any_context_gets_depth() ->
     assert working.memory_tokens <= 200
 
 
+def test_builder_stops_at_minimal_sufficiency_instead_of_filling_the_budget() -> None:
+    """Low-relevance evidence is pollution, not a bonus for having tokens left.
+
+    Admitting every group that fits spends most of the context on turns that a strong
+    query match already made unnecessary. The floor uses only the system's own scores.
+    """
+
+    strong = event("strong-1", 1, "SQLITE_BUSY 锁竞争 根因确认")
+    weak = [event(f"weak-{index}", index, f"迁移步骤 {index} 的普通记录") for index in range(2, 8)]
+    request = AssemblyRequest(
+        query="SQLITE_BUSY 锁竞争 根因确认",
+        recent_events=[],
+        event_pool=[strong, *weak],
+        context_catalog=[context()],
+        assignments=[assignment(item.event_id) for item in [strong, *weak]],
+        as_of_sequence=8,
+        token_budget=2048,
+    )
+
+    working = assemble_context(request, decision())
+
+    assert "strong-1" in working.included_event_ids
+    dropped_reasons = {str(d.get("reason")) for d in working.dropped_candidates}
+    assert "minimal_sufficiency_floor" in dropped_reasons
+    assert working.memory_tokens < 2048, "the budget must not be treated as a target"
+
+
+def test_builder_honours_a_per_context_depth_cap() -> None:
+    """A selected context may be capped so no single context dominates the budget."""
+
+    from context_router.assembly import builder as builder_module
+
+    events = [event(f"e-{index}", index, "SQLITE_BUSY 记录") for index in range(1, 10)]
+    request = AssemblyRequest(
+        query="SQLITE_BUSY",
+        recent_events=[],
+        event_pool=events,
+        context_catalog=[context()],
+        assignments=[assignment(item.event_id) for item in events],
+        as_of_sequence=10,
+        token_budget=2048,
+    )
+    original = builder_module.EVIDENCE_MAX_GROUPS_PER_CONTEXT
+    try:
+        builder_module.EVIDENCE_MAX_GROUPS_PER_CONTEXT = 1
+        capped = assemble_context(request, decision())
+    finally:
+        builder_module.EVIDENCE_MAX_GROUPS_PER_CONTEXT = original
+
+    reasons = {str(d.get("reason")) for d in capped.dropped_candidates}
+    assert "minimal_sufficiency_depth" in reasons
+    assert len(capped.included_event_ids) < len(events)
+
+
 def test_builder_never_breaks_its_memory_budget_or_truncates_an_event() -> None:
     events = [
         event(f"evt-{index}", index, f"完整事件-{index} " + "细节 " * 20) for index in range(1, 8)

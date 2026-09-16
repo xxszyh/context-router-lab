@@ -111,8 +111,8 @@ comparable.
 | `global_bm25` | 749.7 | 775.0 | 74.8% | 1.000 | 0 |
 | `global_dense` | 779.5 | 810.0 | 73.8% | 0.949 | 0 |
 | `global_hybrid` | 779.9 | 804.0 | 73.8% | 0.974 | 0 |
-| `hybrid_router` | 915.4 | 779.5 | 69.3% | 1.000 | 0 |
-| `oracle_router` | 603.4 | 560.0 | **79.7%** | 1.000 | 0 |
+| `hybrid_router` | 714.3 | 587.0 | **76.0%** | 1.000 | 0 |
+| `oracle_router` | 440.2 | 439.5 | **85.2%** | 1.000 | 0 |
 
 Measured on the 780-checkpoint synthetic dataset at a 2 048-token budget, with the
 router on its default configuration.
@@ -121,7 +121,7 @@ router on its default configuration.
 
 | Criterion | Result |
 |---|---|
-| Oracle token reduction vs full history | **79.7%** (target >= 30%) |
+| Oracle token reduction vs full history | **85.2%** (target >= 30%) |
 | Oracle evidence recall vs full history | not worse (1.000 vs 1.000) |
 | Future-event leakage, all arms | 0 |
 | Answer quality | **not yet measured** |
@@ -136,9 +136,13 @@ against a pinned main model and is reported as unverified rather than assumed.
   tokens and recover only 46–54% of the labelled evidence. `query_recent_only` at 95.4%
   savings is not a result, it is a failure that happens to be small. Any claim resting on
   token reduction alone is worthless here.
-- **The oracle proves the architecture, and by a wide margin.** 79.7% of memory tokens
+- **The oracle proves the architecture, and by a wide margin.** 85.2% of memory tokens
   can go while keeping every evidence set. So selective context assembly is worth
   building — gate one passes on substance, not on a technicality.
+- **The router now beats the strongest baseline on both axes.** 714.3 memory tokens at
+  evidence recall 1.000, against `global_bm25` at 749.7 for the same recall. That is the
+  project's claim — same quality, fewer tokens — measured against the baseline that
+  previously beat it.
 
 A third signal sits in the dense rows: `global_dense` (0.949) and `global_hybrid`
 (0.974) still land *below* `global_bm25` (1.000), so fusing the embedding in still hurts.
@@ -146,30 +150,31 @@ That is measured evidence that the default hashing embedder carries no semantics
 limitation 2 below — and it means the dense and hybrid arms should not be read as
 dense-retrieval results at all.
 
-### Out-of-sample: matching recall, not yet matching cost
+### Out-of-sample: the claim, on held-out sessions
 
-The router now matches BM25's evidence recall. It does **not** yet match its token cost,
-and that gap is the honest headline. With a ranker trained on sessions 0–35 and a policy
-tuned on sessions 36–47, scored on the disjoint sessions 48–59:
+With a ranker trained on sessions 0–35 and a policy tuned on sessions 36–47, scored on the
+disjoint sessions 48–59:
 
-| Arm on the held-out split | Evidence recall | Mean memory tokens |
-|---|---:|---:|
-| `hybrid_router`, default | 1.000 | 915 |
-| `hybrid_router`, trained + tuned | 1.000 | **838** |
-| `global_bm25` | 1.000 | **750** |
-| `oracle_router` | 1.000 | 603 |
+| Arm on the held-out split | Evidence recall | Mean memory tokens | vs `global_bm25` |
+|---|---:|---:|---:|
+| `hybrid_router`, default | 1.000 | 714 | −4.8% |
+| `hybrid_router`, trained + tuned | 1.000 | **642** | **−14.4%** |
+| `global_bm25` | 1.000 | 750 | — |
+| `oracle_router` | 1.000 | 440 | −41.3% |
 
-Read it for what it says: the router and BM25 both recover every labelled evidence set,
-but the router spends **12–22% more tokens** to do it, and the oracle shows that roughly
-four fifths of a saving is still available (603 vs 915 tokens). The project's whole claim
-is "same answer quality for fewer tokens", and right now the router delivers the same
-quality for *more* tokens. That is progress from being dominated outright, and it is not
-yet the result the plan set out to prove.
+Full evidence recall at **14.4% fewer memory tokens** than the strongest baseline, on
+sessions the router was never trained or tuned on. The oracle's 440 says roughly another
+third is still on the table, so this is a first result rather than a ceiling.
 
-The gate-two operating constraints are closer too. On the dev split the tuned policy
-reaches a high-confidence error rate of 0.013 (target ≤ 0.02) and cross-context recall of
-0.958 (target ≥ 0.90), but required-context recall of 0.840 against a target of 0.95 — so
-gate two is **not** passed.
+Two caveats on how this was obtained. The minimal-sufficiency floor (`0.5`) was chosen by
+sweep on sessions 0–29 and then **held on the disjoint 48–59 range, where it reproduced** —
+a setting that had been fitted to the test split would not survive that. And the floor uses
+only the system's own relevance scores, never the labels, so it is a standard relevance
+cutoff rather than a label-fitted oracle.
+
+Gate two is **not** passed. On the dev split the tuned policy reaches a high-confidence
+error rate of 0.013 (target ≤ 0.02) and cross-context recall of 0.958 (target ≥ 0.90), but
+required-context recall of 0.840 against a target of 0.95.
 
 ```bash
 ctxlab generate-synthetic run/train --sessions 36 --session-start 0
@@ -224,12 +229,23 @@ Chasing the last 2.7% found two more, and the second was **not in the system at 
    from its siblings**. No retrieval system could have found it. The generator now names
    what it wants from each side. This took the residual to **0 of 330**.
 
+7. **The Builder treated the token budget as a target.** With recall already perfect, token
+   accounting showed where the memory actually went — 631 of 821 tokens to evidence, with
+   the mean *minimal* prefix that still covers a labelled set costing 296. So **64% of
+   everything spent was waste**, admitted only because tokens remained. Worse, the router
+   was selecting three contexts in 85 checkpoints when **no checkpoint in the benchmark
+   ever requires three**. Evidence groups now stop at minimal sufficiency: a group is
+   dropped when it scores below half its own context's best. On the 780-checkpoint
+   benchmark that took the router from 915 to 714 tokens with recall unchanged at 1.000 —
+   which is what finally put it ahead of `global_bm25`, 714 against 750.
+
 The general lesson, and the reason the harness now measures this: a benchmark whose budget
 never binds and whose sessions are too short cannot tell a broken router from a working
-one. **Defects 1–4 were invisible until the dataset was widened, and 6 was invisible until
-the evidence layer was instrumented.** A benchmark bug and a system bug look identical
-from the score alone, so the diagnostic loop classifies every failure by the layer that
-dropped the evidence instead of reporting a single number.
+one. **Defects 1–4 were invisible until the dataset was widened, 6 was invisible until the
+evidence layer was instrumented, and 7 was invisible until the tokens were counted by
+section rather than reported as one number.** A benchmark bug and a system bug look
+identical from the score alone, so the diagnostic loop classifies every failure by the
+layer that dropped the evidence instead of reporting a single score.
 
 ## Scope of Phase 0–1
 
@@ -262,10 +278,10 @@ any Codex/MCP integration.
    overreach.
 4. **A clean diagnostic sample is not a clean system.** The diagnostic loop now reports
    0 lost evidence sets out of 330 answerable checkpoints, but that is a sample of a
-   synthetic benchmark whose labels the generator itself writes. The measured token gap
-   against `global_bm25` (838 vs 750 out of sample, against the oracle's 603) is the real
-   outstanding defect, and this benchmark has already proven capable of hiding four
-   defects at once — so read a clean score as "nothing left to see here", not "correct".
+   synthetic benchmark whose labels the generator itself writes. This benchmark has
+   already shown it can hide several defects at once, so read a clean score as "nothing
+   left to see here", not "correct". The remaining measured gap is the distance to the
+   oracle: 642 tokens against 440 out of sample, which is the next thing worth chasing.
 5. **The synthetic sessions are still templated.** Six interleaved contexts, evidence up
    to 17 events behind the checkpoint, tool call/result pairs, cross-context and
    unresolvable checkpoints are all covered. Not yet covered, from the plan's harder-case
@@ -334,19 +350,22 @@ Apache-2.0. See [LICENSE](LICENSE).
 2. **Oracle 以很大余量证明架构成立**：省 79.7% 且证据召回一条不丢，第一道门槛通过。
 
 **Router 曾经被最朴素的 BM25 全面压过**（召回 0.744 vs 1.000，token 还更多）。那 0.744
-是真的，但从它得出的结论是错的。逐层诊断后定位到**六个**缺陷：关系规则太窄、`unknown`
-被当成确信而收窄到单一上下文、**近期窗口被拼进检索 query**（最大元凶，正是计划警告的
-"上下文黏滞"）、`relation_match` 反而奖励"正在离开的上下文"、**Builder 按全局得分顺序
-花预算**（一个上下文的长尾能挤掉另一个*已选中*上下文的唯一证据）、以及最后 5 例的真凶
-**竟是标签本身不可回答**——query 只写了两个 Context 的名字，而每个 episode 都共用同一个
-anchor 文件与标记，query 里**没有任何线索能区分被标注的那个 episode**，换成任何系统都
-检索不到。六项修完后残差 **0/330**。
+是真的，但从它得出的结论是错的。逐层诊断后定位到**七个**缺陷：**(1)** 关系规则太窄；
+**(2)** `unknown` 被当成确信而收窄到单一上下文；**(3) 最大元凶——近期窗口被拼进检索
+query**（正是计划警告的"上下文黏滞"）；**(4)** `relation_match` 反而奖励"正在离开的
+上下文"；**(5)** Builder 按全局得分顺序花预算，一个上下文的长尾能挤掉另一个*已选中*
+上下文的唯一证据；**(6)** 最后 5 例的真凶**竟是标签本身不可回答**（query 只写了两个
+Context 的名字，而每个 episode 共用同一 anchor 与标记，**没有任何线索能区分被标注的
+episode**，换任何系统都检索不到）；**(7)** Builder 把 token 预算当成了目标——按 section
+记账后发现证据占 631/821 token，而覆盖标注集所需的**最小前缀只要 296**，即 **64% 是纯
+浪费**；且 Router 在 85 个检查点选了 3 个 Context，而**全数据集没有任何检查点需要 3 个**。
 
-修完后 Router 在留出的测试会话上**召回追平 BM25（都是 1.000）**，但**token 仍贵 12–22%**
-（838–915 vs 750），而 Oracle 的 603 说明还有约五分之四的节省空间没拿到。**项目的命题是
-"同等质量、更少 token"，目前做到的是同等质量、更多 token**——这比被全面压过是进步，但
-还不是计划要证明的结果。第二道门槛也未通过：dev 上高置信错误率 0.013 ✓、跨上下文召回
-0.958 ✓，但 required-context 召回 0.840 < 0.95。
+七项修完后：**残差 0/330**，且 Router 在留出的测试会话上取得 **召回 1.000 / 642 token**，
+**比 `global_bm25`（1.000 / 750）少 14.4% token**——**项目的命题「同等质量、更少 token」
+首次成立**。Oracle 的 440 说明还有约三分之一空间。最小充分性的阈值 0.5 是在 0–29 会话上
+扫出来的，**在完全不相交的 48–59 上复现**，且只用系统自身分数、不用标签。**第二道门槛
+仍未通过**：dev 上高置信错误率 0.013 ✓、跨上下文召回 0.958 ✓，但 required-context 召回
+0.840 < 0.95。
 
 另外 `global_dense`(0.949) 与 `global_hybrid`(0.974) 仍**低于** `global_bm25`(1.000)，
 这是默认哈希嵌入器不含语义的直接证据。答案质量尚未测量——必须先固定主模型才能下结论。
