@@ -247,6 +247,35 @@ section rather than reported as one number.** A benchmark bug and a system bug l
 identical from the score alone, so the diagnostic loop classifies every failure by the
 layer that dropped the evidence instead of reporting a single score.
 
+## Answer quality: first run
+
+Everything above measures **evidence recall**, which is a proxy for answer quality and not
+a substitute for it. `ctxlab answer-experiment` and `ctxlab judge-answers` now measure the
+real thing: a main model answers each arm's memory, and a blinded judge compares the
+answers pairwise in both orders.
+
+The first run (60 answer calls, 40 judge calls) established the **direction** and nothing
+more:
+
+- **Evidence recall is a valid proxy here.** The arm with 0.55 recall scores far worse on
+  both instruments, and the mechanism is refusal — it declines 60% of the time rather than
+  fabricating an answer from parametric knowledge.
+- **Router and oracle remain indistinguishable on answer quality**, matching their
+  identical evidence recall, so the oracle's remaining 2× memory advantage buys no
+  measurable quality on this sample.
+
+It did **not** establish magnitudes: the judge agrees with itself across answer order only
+80% of the time, about 20% of its calls produced no readable verdict, and 5 of the 8 ties
+are checkpoints where a refusal was the correct answer and neither arm had anything to say.
+
+**These numbers are illustrative and not reproducible.** The model used is a private proxy
+alias, not a documented identifier. Read
+[`docs/answer-quality-experiment.md`](docs/answer-quality-experiment.md) for the full
+report, including the three instrument failures that made the first two runs unusable —
+the lexical metric scoring fluent refusals as correct answers, the judge discarding the
+replies it needed for diagnosis, and a thinking block consuming the output budget so the
+verdict was never emitted.
+
 ## Scope of Phase 0–1
 
 Implemented: append-only SQLite event store with causal replay and lossless JSONL
