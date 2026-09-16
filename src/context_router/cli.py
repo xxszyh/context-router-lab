@@ -328,7 +328,7 @@ def judge_answers_command(
     model: Annotated[str | None, typer.Option(help="Pinned model id")] = None,
     base_url: Annotated[str | None, typer.Option()] = None,
     auth_style: Annotated[str, typer.Option(help="bearer or x-api-key")] = "bearer",
-    max_tokens: Annotated[int, typer.Option(min=64)] = 2048,
+    max_tokens: Annotated[int, typer.Option(min=64)] = 4096,
     judge_kind: Annotated[str, typer.Option("--judge", help="llm or coverage")] = "llm",
 ) -> None:
     """Blind-judge two arms' answers pairwise, in both orders, and tally the wins.
@@ -406,7 +406,7 @@ def judge_answers_command(
             "judge_input_tokens": getattr(judge, "input_tokens", 0),
             "judge_output_tokens": getattr(judge, "output_tokens", 0),
             "tally": tally,
-            "raw_replies": getattr(judge, "replies", []),
+            "judge_calls": [c.model_dump(mode="json") for c in getattr(judge, "calls", [])],
             "outcomes": [outcome.model_dump(mode="json") for outcome in outcomes],
         },
     )

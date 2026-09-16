@@ -180,8 +180,9 @@ class _ScriptedModel:
 
     model_version = "scripted-judge-model"
 
-    def __init__(self, replies: list[str]) -> None:
+    def __init__(self, replies: list[str], *, stop_reason: str | None = "end_turn") -> None:
         self.replies = list(replies)
+        self.stop_reason = stop_reason
         self.prompts: list[str] = []
 
     def run(self, *, prompt: str, instructions: str) -> AnswerResult:
@@ -194,7 +195,7 @@ class _ScriptedModel:
             input_tokens=10,
             output_tokens=5,
             total_tokens=15,
-            stop_reason="end_turn",
+            stop_reason=self.stop_reason,
             raw_response={},
         )
 
@@ -256,7 +257,7 @@ def test_unparseable_replies_are_kept_for_diagnosis() -> None:
     judge = LLMJudge(model, retries=1)
 
     assert judge.compare(query="q", requirements=["r"], answer_a="A", answer_b="B") == "tie"
-    assert judge.replies == ["garbage one", "still garbage"]
+    assert [c.text for c in judge.calls] == ["garbage one", "still garbage"]
     assert judge.parse_failures == 1
 
 
@@ -272,7 +273,7 @@ def test_an_empty_reply_is_retried_rather_than_losing_the_pair() -> None:
 
     assert judge.compare(query="q", requirements=["r"], answer_a="A", answer_b="B") == "b"
     assert judge.parse_failures == 0
-    assert judge.replies == ["", '{"winner": "b", "reason": "x"}']
+    assert [c.text for c in judge.calls] == ["", '{"winner": "b", "reason": "x"}']
 
 
 def test_the_coverage_judge_is_order_invariant_unlike_a_model() -> None:
@@ -325,3 +326,18 @@ def test_the_instructions_are_in_the_blinded_judge_prompt_path() -> None:
 
     assert judge.compare(query="q", requirements=["r"], answer_a="A", answer_b="B") == "a"
     assert "hybrid_router" not in model.prompts[0]
+
+
+def test_a_cut_off_reply_is_distinguishable_from_one_never_produced() -> None:
+    """The two need different fixes: a bigger budget, versus a different prompt.
+
+    Not having this field is why the judge had to be re-run twice to find out which of the
+    two was happening.
+    """
+
+    model = _ScriptedModel(["", '{"winner": "a", "reason": "x"}'])
+    judge = LLMJudge(model, retries=1)
+    judge.compare(query="q", requirements=["r"], answer_a="A", answer_b="B")
+
+    assert [call.stop_reason for call in judge.calls] == ["end_turn", "end_turn"]
+    assert [call.output_tokens for call in judge.calls] == [5, 5]

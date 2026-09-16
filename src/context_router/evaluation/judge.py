@@ -52,6 +52,19 @@ class Judge(Protocol):
     ) -> Verdict: ...
 
 
+class JudgeCall(Contract):
+    """One raw model call the judge made, kept so a failure can be diagnosed for free.
+
+    `stop_reason` is the field that would have saved two re-runs: it distinguishes a reply
+    that was cut off at the token cap from one the model simply did not produce, and those
+    need different fixes.
+    """
+
+    text: str
+    stop_reason: str | None
+    output_tokens: int
+
+
 class JudgePair(Contract):
     sample_id: str
     query: str
@@ -176,9 +189,9 @@ class LLMJudge:
         self.parse_failures = 0
         self.input_tokens = 0
         self.output_tokens = 0
-        #: Raw replies, kept because the first judge run lost 14 of 40 to unreadable output
+        #: Every call, kept because the first judge run lost 14 of 40 to unreadable output
         #: and there was no way to find out what they said without paying for them again.
-        self.replies: list[str] = []
+        self.calls: list[JudgeCall] = []
 
     def compare(
         self, *, query: str, requirements: list[str], answer_a: str, answer_b: str
@@ -191,7 +204,13 @@ class LLMJudge:
             result = self.model.run(prompt=prompt, instructions=JUDGE_INSTRUCTIONS)
             self.input_tokens += result.input_tokens
             self.output_tokens += result.output_tokens
-            self.replies.append(result.text)
+            self.calls.append(
+                JudgeCall(
+                    text=result.text,
+                    stop_reason=result.stop_reason,
+                    output_tokens=result.output_tokens,
+                )
+            )
             verdict = parse_verdict(result.text)
             if verdict is not None:
                 return verdict
