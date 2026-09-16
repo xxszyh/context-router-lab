@@ -9,6 +9,7 @@ import httpx
 from pydantic import Field
 
 from context_router.domain import Contract
+from context_router.providers.pinned import require_pinned_model
 
 
 class AnswerResult(Contract):
@@ -45,10 +46,8 @@ class OpenAICompatibleAnswerProvider:
         client: httpx.Client | None = None,
         timeout: float = 120.0,
     ) -> None:
-        if not model or model in {"latest", "default"}:
-            raise ValueError("an explicit pinned model identifier is required")
         self.base_url = base_url.rstrip("/")
-        self.model = model
+        self.model = require_pinned_model(model)
         self.client = client or httpx.Client(timeout=timeout)
         self.headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
