@@ -20,6 +20,7 @@ from context_router.evaluation import (
     ARM_NAMES,
     RouteCaseResult,
     build_arm_cases,
+    describe_router,
     evaluate_arms,
     evaluate_routes,
     first_gate,
@@ -67,10 +68,15 @@ def _session_contexts(
 def generate_synthetic(
     output: Annotated[Path, typer.Argument(help="Output dataset directory")],
     sessions: Annotated[int, typer.Option(min=1)] = 60,
+    session_start: Annotated[int, typer.Option(min=0, help="First session index")] = 0,
 ) -> None:
-    """Generate deterministic bilingual coding conversations."""
+    """Generate deterministic bilingual coding conversations.
 
-    counts = generate_synthetic_dataset(sessions).write(output)
+    Use a distinct --session-start per split so train and test conversations never
+    overlap.
+    """
+
+    counts = generate_synthetic_dataset(sessions, session_start=session_start).write(output)
     typer.echo(json.dumps(counts, ensure_ascii=False, sort_keys=True))
 
 
@@ -242,16 +248,26 @@ def compare_baselines_command(
     benchmark: Annotated[Path, typer.Argument()],
     output: Annotated[Path, typer.Argument()],
     token_budget: Annotated[int, typer.Option(min=32)] = 2048,
+    ranker_file: Annotated[Path | None, typer.Option()] = None,
+    policy_file: Annotated[Path | None, typer.Option()] = None,
 ) -> None:
-    """Compare every memory strategy on tokens and evidence recall, entirely offline."""
+    """Compare every memory strategy on tokens and evidence recall, entirely offline.
+
+    Pass a ranker and/or policy trained on a disjoint session range to report the
+    router's configured performance rather than only its defaults.
+    """
 
     store = SQLiteEventStore(database)
+    ranker = PlattContextRanker.load(ranker_file) if ranker_file else None
+    policy = RoutingPolicy(**json.loads(policy_file.read_text())) if policy_file else None
+    router = ContextRouter(ranker=ranker, policy=policy)
     cases = build_arm_cases(store, _read_benchmark(benchmark), token_budget=token_budget)
-    results = [run_arm(name, case) for case in cases for name in ARM_NAMES]
+    results = [run_arm(name, case, router=router) for case in cases for name in ARM_NAMES]
     summary = evaluate_arms(results)
     payload = {
         "schema_version": "1.0",
         "token_budget": token_budget,
+        "router_profile": describe_router(router),
         "summary": summary,
         "gate": first_gate(summary),
         "results": [result.model_dump(mode="json") for result in results],
@@ -327,6 +343,7 @@ def _arms_report(payload: dict[str, Any]) -> list[str]:
         "measured here and requires a run against a pinned main model.",
         "",
         f"- Token budget per arm: {payload['token_budget']}",
+        f"- Router profile: {payload.get('router_profile', 'default')}",
         f"- Checkpoints: {int(summary['oracle_router']['count'])}",
         "",
         "| Arm | Mean memory tokens | Median | vs Full history | Evidence recall | Leakage |",

@@ -22,6 +22,10 @@ FEATURE_NAMES = (
     "relation_match",
 )
 
+#: Bump whenever a feature's *meaning* changes, not just its name. A ranker fitted under
+#: older semantics produces confident nonsense, so it must be refused rather than loaded.
+FEATURE_SCHEMA_VERSION = "2"
+
 
 class CandidateRanker(Protocol):
     model_version: str
@@ -128,6 +132,7 @@ class PlattContextRanker:
     def to_dict(self) -> dict[str, object]:
         return {
             "schema_version": "1.0",
+            "feature_schema_version": FEATURE_SCHEMA_VERSION,
             "feature_names": list(FEATURE_NAMES),
             "means": self.means,
             "scales": self.scales,
@@ -149,6 +154,12 @@ class PlattContextRanker:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         if tuple(data["feature_names"]) != FEATURE_NAMES:
             raise ValueError("ranker feature schema does not match this version")
+        if data.get("feature_schema_version") != FEATURE_SCHEMA_VERSION:
+            raise ValueError(
+                "ranker was fitted under different feature semantics "
+                f"(file={data.get('feature_schema_version')!r}, "
+                f"expected={FEATURE_SCHEMA_VERSION!r}); retrain it"
+            )
         return cls(
             means=data["means"],
             scales=data["scales"],

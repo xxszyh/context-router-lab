@@ -133,6 +133,8 @@ class ArmCaseResult(Contract):
     decision: Decision
     confidence: float = Field(ge=0.0, le=1.0)
     routing_trace_id: str
+    #: Describes the configuration that produced the result, not just its arm name.
+    router_profile: str = "deterministic"
 
 
 @dataclass(frozen=True)
@@ -457,6 +459,7 @@ def _result(
     decision: Decision = "route",
     confidence: float = 1.0,
     trace_id: str = "",
+    router_profile: str = "deterministic",
 ) -> ArmCaseResult:
     causal = {event.event_id for event in case.events}
     included = set(assembly.included_event_ids)
@@ -478,11 +481,40 @@ def _result(
         decision=decision,
         confidence=confidence,
         routing_trace_id=trace_id,
+        router_profile=router_profile,
     )
 
 
-def run_arm(name: ArmName, case: ArmCase, *, counter: TokenCounter | None = None) -> ArmCaseResult:
-    """Run a single comparison arm on a single checkpoint."""
+def describe_router(router: ContextRouter) -> str:
+    """A stable label for the router configuration a result was produced with."""
+
+    policy = router.policy
+    thresholds = ",".join(
+        f"{name}={getattr(policy, name)}"
+        for name in ("t_low", "t_high", "margin", "confidence_threshold", "max_candidates")
+    )
+    return "|".join(
+        (
+            f"ranker={router.ranker.model_version}",
+            f"relation={router.relation_classifier.model_version}",
+            f"embedding={router.embedding_provider.model_version}",
+            f"policy({thresholds})",
+        )
+    )
+
+
+def run_arm(
+    name: ArmName,
+    case: ArmCase,
+    *,
+    counter: TokenCounter | None = None,
+    router: ContextRouter | None = None,
+) -> ArmCaseResult:
+    """Run a single comparison arm on a single checkpoint.
+
+    ``router`` lets the hybrid arm report its *configured* performance, so a trained
+    ranker or a tuned policy can be measured instead of only the defaults.
+    """
 
     tokens = counter or TokenCounter()
     analyzer = LexicalAnalyzer()
@@ -527,8 +559,14 @@ def run_arm(name: ArmName, case: ArmCase, *, counter: TokenCounter | None = None
         token_budget=case.token_budget,
         system_rules=case.system_rules,
     )
+    active_router = router or ContextRouter()
+    profile = "deterministic"
     if name == "hybrid_router":
-        decision = ContextRouter().route(
+        profile = describe_router(active_router)
+    elif name == "oracle_router":
+        profile = "ground-truth"
+    if name == "hybrid_router":
+        decision = active_router.route(
             RouteRequest(
                 query_event_id=case.query_event_id,
                 query=case.query,
@@ -550,6 +588,7 @@ def run_arm(name: ArmName, case: ArmCase, *, counter: TokenCounter | None = None
         decision=decision.decision,
         confidence=decision.confidence,
         trace_id=decision.trace_id,
+        router_profile=profile,
     )
 
 

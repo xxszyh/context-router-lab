@@ -510,9 +510,19 @@ def generate_synthetic_dataset(
     *,
     contexts_per_session: int = DEFAULT_CONTEXTS,
     episodes_per_context: int = DEFAULT_EPISODES,
+    session_start: int = 0,
 ) -> SyntheticDataset:
+    """Generate sessions ``session_start`` .. ``session_start + session_count - 1``.
+
+    ``session_start`` exists so a train / dev / test split can be generated as disjoint
+    session ranges instead of being hoped for. A ranker trained on one range and scored on
+    another is the only way the numbers mean anything.
+    """
+
     if session_count < 1:
         raise ValueError("session_count must be positive")
+    if session_start < 0:
+        raise ValueError("session_start must not be negative")
     if episodes_per_context < QUERY_EVERY:
         raise ValueError(f"episodes_per_context must be at least {QUERY_EVERY}")
     blueprints = _blueprints_for(contexts_per_session)
@@ -522,7 +532,7 @@ def generate_synthetic_dataset(
     queries: list[BenchmarkQuery] = []
     base_time = datetime(2026, 1, 1, tzinfo=UTC)
 
-    for session_index in range(session_count):
+    for session_index in range(session_start, session_start + session_count):
         session_id = f"syn-{session_index:03d}"
         session_events, session_assignments, labelled, first_event = _build_session(
             session_id=session_id,

@@ -73,12 +73,11 @@ class ContextRouter:
         if not contexts:
             return self._empty_decision(relation, relation_probabilities)
 
-        recent_text = (
-            ""
-            if relation == "new_context"
-            else "\n".join(event.content for event in request.recent_events[-3:])
-        )
-        retrieval_query = f"{request.query}\n{recent_text}" if recent_text else request.query
+        # The retrieval query is the user's query and nothing else. The recent window is a
+        # coreference signal that belongs in the reranking features, never in retrieval:
+        # concatenating it here lets the context being left dominate BM25 and the dense
+        # channel, which is precisely the context stickiness the plan warns about.
+        retrieval_query = request.query
         lexical_index = BM25Index(
             {key: value.searchable_text() for key, value in contexts.items()},
             analyzer=self.analyzer,
@@ -225,11 +224,12 @@ class ContextRouter:
         recent = float(context_id in request.recent_context_ids)
         delta = max(request.as_of_sequence - context.last_active_sequence, 0)
         recency = math.exp(-delta / 20.0)
+        # A return reaches a context that is by construction not among the recent ones, so
+        # rewarding `recent` for `switch_or_return` rewards the opposite of the answer.
+        # Only cues that genuinely point at the live context are kept.
         relation_match = 0.0
         if relation == "continue" and primary:
             relation_match = 1.0
-        elif relation == "switch_or_return" and recent and not primary:
-            relation_match = 0.8
         elif relation == "cross_context" and (primary or recent):
             relation_match = 0.6
         return {
@@ -269,11 +269,12 @@ class ContextRouter:
         )
 
         maximum = min(request.max_selected_contexts, self.policy.max_candidates)
-        if (
-            first >= self.policy.t_high
-            and margin >= self.policy.margin
-            and relation != "cross_context"
-        ):
+        # Only a relation that asserts a single continuation context may collapse to the
+        # top-1. `cross_context` needs several contexts by definition, and `unknown` is an
+        # admission of ignorance: collapsing it to one confident-looking context turns a
+        # relation-classifier miss into silently discarded evidence.
+        single_context = relation in ("continue", "switch_or_return")
+        if first >= self.policy.t_high and margin >= self.policy.margin and single_context:
             selected = [candidates[0].context_id]
         else:
             selected = [

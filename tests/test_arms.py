@@ -188,6 +188,38 @@ def test_oracle_reduces_memory_tokens_on_the_synthetic_dataset(
     )
 
 
+def test_hybrid_arm_reports_a_configured_router(cases: list[ArmCase]) -> None:
+    """The arm must be able to measure a trained ranker / tuned policy, not just defaults."""
+
+    from context_router.routing import ContextRouter
+    from context_router.routing.router import RoutingPolicy
+
+    default = run_arm("hybrid_router", cases[0])
+    assert "ranker=heuristic-v1" in default.router_profile
+    assert "policy(t_low=0.35" in default.router_profile
+    assert run_arm("oracle_router", cases[0]).router_profile == "ground-truth"
+    assert run_arm("full_history", cases[0]).router_profile == "deterministic"
+
+    # A policy that refuses to settle for one context must actually change the outcome.
+    wide = ContextRouter(policy=RoutingPolicy(t_high=0.99, margin=0.99))
+    configured = run_arm("hybrid_router", cases[0], router=wide)
+    assert configured.router_profile != default.router_profile
+    assert "t_high=0.99" in configured.router_profile
+    assert len(configured.selected_context_ids) >= len(default.selected_context_ids)
+
+
+def test_generator_session_start_produces_disjoint_sessions() -> None:
+    """Train and test splits must not share a conversation."""
+
+    train = generate_synthetic_dataset(session_count=2, session_start=0)
+    test = generate_synthetic_dataset(session_count=2, session_start=2)
+    train_ids = {event.session_id for event in train.events}
+    test_ids = {event.session_id for event in test.events}
+    assert train_ids == {"syn-000", "syn-001"}
+    assert test_ids == {"syn-002", "syn-003"}
+    assert train_ids.isdisjoint(test_ids)
+
+
 def test_full_history_outgrows_the_memory_budget(results: list[ArmCaseResult]) -> None:
     """The dataset must be large enough that the budget actually constrains the arms."""
 
