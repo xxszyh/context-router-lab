@@ -108,6 +108,7 @@ class ArmCase(Contract):
     recent_events: list[RawEvent] = Field(default_factory=list)
     required_context_ids: list[str] = Field(default_factory=list)
     acceptable_evidence_sets: list[list[str]] = Field(default_factory=list)
+    answer_requirements: list[str] = Field(default_factory=list)
     relation_label: Relation = "unknown"
     primary_context_id: str | None = None
     recent_context_ids: list[str] = Field(default_factory=list)
@@ -325,6 +326,7 @@ def build_arm_cases(
                 recent_events=recent,
                 required_context_ids=list(sample.required_context_ids),
                 acceptable_evidence_sets=[list(item) for item in sample.acceptable_evidence_sets],
+                answer_requirements=list(sample.answer_requirements),
                 relation_label=sample.relation_label,
                 primary_context_id=sample.primary_context_id,
                 recent_context_ids=list(sample.recent_context_ids),
@@ -450,38 +452,28 @@ def _active_context_ids(case: ArmCase) -> list[str]:
     return list(dict.fromkeys(cid for cid in candidates if cid))
 
 
-def _result(
-    arm: ArmName,
-    case: ArmCase,
-    assembly: _Assembly,
-    *,
-    selected_context_ids: list[str],
-    decision: Decision = "route",
-    confidence: float = 1.0,
-    trace_id: str = "",
-    router_profile: str = "deterministic",
-) -> ArmCaseResult:
+def _result(arm: ArmName, case: ArmCase, built: ArmAssembly) -> ArmCaseResult:
     causal = {event.event_id for event in case.events}
-    included = set(assembly.included_event_ids)
+    included = set(built.included_event_ids)
     return ArmCaseResult(
         arm=arm,
         sample_id=case.sample_id,
         session_id=case.session_id,
         required_context_ids=list(case.required_context_ids),
-        selected_context_ids=list(selected_context_ids),
-        included_event_ids=list(assembly.included_event_ids),
-        sections=list(assembly.sections),
-        memory_tokens=assembly.memory_tokens,
-        total_input_tokens=assembly.total_input_tokens,
+        selected_context_ids=list(built.selected_context_ids),
+        included_event_ids=list(built.included_event_ids),
+        sections=list(built.sections),
+        memory_tokens=built.memory_tokens,
+        total_input_tokens=built.total_input_tokens,
         token_budget=case.token_budget,
         evidence_set_recall=evidence_set_recall(
-            case.acceptable_evidence_sets, assembly.included_event_ids
+            case.acceptable_evidence_sets, built.included_event_ids
         ),
         future_leakage=len(included - causal),
-        decision=decision,
-        confidence=confidence,
-        routing_trace_id=trace_id,
-        router_profile=router_profile,
+        decision=built.decision,
+        confidence=built.confidence,
+        routing_trace_id=built.trace_id,
+        router_profile=built.router_profile,
     )
 
 
@@ -503,68 +495,104 @@ def describe_router(router: ContextRouter) -> str:
     )
 
 
-def run_arm(
+@dataclass(frozen=True)
+class ArmAssembly:
+    """What one arm hands to the main model, plus the routing provenance behind it.
+
+    This is the single place that decides what each arm shows the model. The routing
+    benchmark scores this, and the answer experiment sends this verbatim, so the two
+    cannot drift apart on the thing they are both supposed to be measuring.
+    """
+
+    arm: ArmName
+    rendered_text: str
+    memory_tokens: int
+    total_input_tokens: int
+    included_event_ids: list[str]
+    selected_context_ids: list[str]
+    dropped: list[dict[str, object]]
+    sections: list[str]
+    decision: Decision
+    confidence: float
+    trace_id: str
+    router_profile: str
+
+
+def assemble_arm(
     name: ArmName,
     case: ArmCase,
     *,
     counter: TokenCounter | None = None,
     router: ContextRouter | None = None,
-) -> ArmCaseResult:
-    """Run a single comparison arm on a single checkpoint.
+) -> ArmAssembly:
+    """Build the memory one arm would show the main model for one checkpoint.
 
-    ``router`` lets the hybrid arm report its *configured* performance, so a trained
-    ranker or a tuned policy can be measured instead of only the defaults.
+    ``router`` lets the hybrid arm report its *configured* performance, so a trained ranker
+    or a tuned policy can be measured instead of only the defaults.
     """
 
     tokens = counter or TokenCounter()
     analyzer = LexicalAnalyzer()
     embedder = HashEmbeddingProvider(analyzer=analyzer)
 
-    if name == "query_recent_only":
-        assembly = _assemble_blocks(
-            _recent_blocks(case), case=case, counter=tokens, budget=case.token_budget
+    def finish(
+        assembly: _Assembly,
+        selected: list[str],
+        *,
+        decision: Decision = "route",
+        confidence: float = 1.0,
+        trace_id: str = "",
+        profile: str = "deterministic",
+    ) -> ArmAssembly:
+        return ArmAssembly(
+            arm=name,
+            rendered_text=assembly.rendered_text,
+            memory_tokens=assembly.memory_tokens,
+            total_input_tokens=assembly.total_input_tokens,
+            included_event_ids=list(assembly.included_event_ids),
+            selected_context_ids=list(selected),
+            dropped=list(assembly.dropped),
+            sections=list(assembly.sections),
+            decision=decision,
+            confidence=confidence,
+            trace_id=trace_id,
+            router_profile=profile,
         )
-        return _result(name, case, assembly, selected_context_ids=[])
+
+    if name == "query_recent_only":
+        return finish(
+            _assemble_blocks(
+                _recent_blocks(case), case=case, counter=tokens, budget=case.token_budget
+            ),
+            [],
+        )
 
     if name == "full_history":
         blocks = [_event_block(event, "evidence", None) for event in case.events]
-        assembly = _assemble_blocks(blocks, case=case, counter=tokens, budget=None)
-        return _result(name, case, assembly, selected_context_ids=[])
+        return finish(_assemble_blocks(blocks, case=case, counter=tokens, budget=None), [])
 
     if name == "sliding_window":
         blocks = [_event_block(event, "recent", None) for event in case.events[-SLIDING_WINDOW:]]
-        assembly = _assemble_blocks(blocks, case=case, counter=tokens, budget=case.token_budget)
-        return _result(name, case, assembly, selected_context_ids=[])
+        return finish(
+            _assemble_blocks(blocks, case=case, counter=tokens, budget=case.token_budget), []
+        )
 
     if name == "summary_recent":
         active = _active_context_ids(case)
         blocks = _descriptor_blocks(active, _context_map(case)) + _recent_blocks(case)
-        assembly = _assemble_blocks(blocks, case=case, counter=tokens, budget=case.token_budget)
-        present = [cid for cid in active if cid in _context_map(case)]
-        return _result(name, case, assembly, selected_context_ids=present)
+        present = [context_id for context_id in active if context_id in _context_map(case)]
+        return finish(
+            _assemble_blocks(blocks, case=case, counter=tokens, budget=case.token_budget),
+            present,
+        )
 
     if name in ("global_bm25", "global_dense", "global_hybrid"):
-        ranking = _global_ranking(case, name, analyzer, embedder)
-        blocks = _evidence_blocks(case, ranking)
-        assembly = _assemble_blocks(blocks, case=case, counter=tokens, budget=case.token_budget)
-        return _result(name, case, assembly, selected_context_ids=[])
+        blocks = _evidence_blocks(case, _global_ranking(case, name, analyzer, embedder))
+        return finish(
+            _assemble_blocks(blocks, case=case, counter=tokens, budget=case.token_budget), []
+        )
 
-    request = AssemblyRequest(
-        query=case.query,
-        recent_events=case.recent_events,
-        event_pool=case.events + case.future_events,
-        context_catalog=case.contexts,
-        assignments=case.assignments,
-        as_of_sequence=case.as_of_sequence,
-        token_budget=case.token_budget,
-        system_rules=case.system_rules,
-    )
     active_router = router or ContextRouter()
-    profile = "deterministic"
-    if name == "hybrid_router":
-        profile = describe_router(active_router)
-    elif name == "oracle_router":
-        profile = "ground-truth"
     if name == "hybrid_router":
         decision = active_router.route(
             RouteRequest(
@@ -577,19 +605,40 @@ def run_arm(
                 as_of_sequence=case.as_of_sequence,
             )
         )
+        profile = describe_router(active_router)
     else:
         decision = oracle_decision(case)
-    assembly = _from_working_context(assemble_context(request, decision))
-    return _result(
-        name,
-        case,
-        assembly,
-        selected_context_ids=decision.selected_context_ids,
+        profile = "ground-truth"
+    request = AssemblyRequest(
+        query=case.query,
+        recent_events=case.recent_events,
+        event_pool=case.events + case.future_events,
+        context_catalog=case.contexts,
+        assignments=case.assignments,
+        as_of_sequence=case.as_of_sequence,
+        token_budget=case.token_budget,
+        system_rules=case.system_rules,
+    )
+    return finish(
+        _from_working_context(assemble_context(request, decision)),
+        decision.selected_context_ids,
         decision=decision.decision,
         confidence=decision.confidence,
         trace_id=decision.trace_id,
-        router_profile=profile,
+        profile=profile,
     )
+
+
+def run_arm(
+    name: ArmName,
+    case: ArmCase,
+    *,
+    counter: TokenCounter | None = None,
+    router: ContextRouter | None = None,
+) -> ArmCaseResult:
+    """Score a single comparison arm on a single checkpoint."""
+
+    return _result(name, case, assemble_arm(name, case, counter=counter, router=router))
 
 
 def evaluate_arms(results: list[ArmCaseResult]) -> dict[str, dict[str, float]]:

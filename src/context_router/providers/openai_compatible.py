@@ -18,6 +18,8 @@ class AnswerResult(Contract):
     input_tokens: int = Field(ge=0)
     output_tokens: int = Field(ge=0)
     total_tokens: int = Field(ge=0)
+    #: Provider stop reason, so a length-truncated answer is visible as such.
+    stop_reason: str | None = None
     raw_response: dict[str, Any]
 
 
@@ -83,6 +85,7 @@ class OpenAICompatibleAnswerProvider:
             input_tokens=int(usage.get("input_tokens", 0)),
             output_tokens=int(usage.get("output_tokens", 0)),
             total_tokens=int(usage.get("total_tokens", 0)),
+            stop_reason=payload.get("stop_reason") or payload.get("status"),
             raw_response=payload,
         )
 

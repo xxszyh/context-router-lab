@@ -95,5 +95,6 @@ class AnthropicCompatibleAnswerProvider:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             total_tokens=input_tokens + output_tokens,
+            stop_reason=payload.get("stop_reason"),
             raw_response=payload,
         )

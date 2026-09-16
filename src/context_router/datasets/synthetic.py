@@ -205,12 +205,18 @@ _DIFFICULTY_BY_TYPE = {
 }
 
 
+#: Requirement for a checkpoint that has no answer in the visible history. Correct
+#: behaviour is a refusal, so the requirement is scored as one.
+REFUSAL_REQUIREMENT = "说明上下文不足以回答，不要编造"
+
+
 @dataclass(frozen=True)
 class _QuerySlot:
     sequence: int
     query_type: str
     target_keys: list[str]
     evidence_ids: list[str]
+    requirements: list[str]
 
 
 @dataclass(frozen=True)
@@ -344,9 +350,40 @@ def _session_plan(
             else:
                 targets = coldest[1:2] or coldest[:1]
             slots.append(
-                _QuerySlot(sequence=0, query_type=query_type, target_keys=targets, evidence_ids=[])
+                _QuerySlot(
+                    sequence=0,
+                    query_type=query_type,
+                    target_keys=targets,
+                    evidence_ids=[],
+                    requirements=[],
+                )
             )
     return emissions, slots
+
+
+def _answer_requirements(
+    query_type: str,
+    target_keys: list[str],
+    topics: dict[str, str],
+    blueprint_by_key: dict[str, _Blueprint],
+) -> list[str]:
+    """What a correct answer has to contain, expressed so it can be scored without a model.
+
+    Each requirement names an ASCII identifier and quotes the sub-topic, which is exactly
+    what distinguishes the labelled episode from its siblings, so a deterministic scorer
+    can check coverage lexically. That score is deliberately shallow -- it cannot tell a
+    correct explanation from a list of the right nouns -- which is why the blinded judge
+    exists alongside it.
+    """
+
+    if query_type in ("new_context", "unanswerable"):
+        return [REFUSAL_REQUIREMENT]
+    requirements: list[str] = []
+    for key in target_keys:
+        blueprint = blueprint_by_key[key]
+        topic = topics.get(key, blueprint.subtopics[0])
+        requirements.append(f"覆盖 {blueprint.anchor} 的「{topic}」结论")
+    return requirements
 
 
 def _query_text(
@@ -482,6 +519,9 @@ def _build_session(
         slot = slots[slot_index]
         slot_index += 1
         text = _query_text(slot.query_type, slot.target_keys, latest_topic, blueprint_by_key)
+        requirements = _answer_requirements(
+            slot.query_type, slot.target_keys, latest_topic, blueprint_by_key
+        )
         query_event = emit("user", "message", text)
         evidence = [
             event_id for target in slot.target_keys for event_id in latest_episode.get(target, [])
@@ -493,6 +533,7 @@ def _build_session(
                     query_type=slot.query_type,
                     target_keys=list(slot.target_keys),
                     evidence_ids=evidence,
+                    requirements=requirements,
                 ),
                 text,
             )
@@ -574,7 +615,7 @@ def generate_synthetic_dataset(
                     acceptable_evidence_sets=evidence_sets,
                     forbidden_future_event_ids=future[:FORBIDDEN_SAMPLE],
                     relation_label=_RELATION_BY_TYPE[slot.query_type],
-                    answer_requirements=[],
+                    answer_requirements=list(slot.requirements),
                     must_abstain=not required,
                     difficulty=_DIFFICULTY_BY_TYPE[slot.query_type],  # type: ignore[arg-type]
                     primary_context_id=primary,
