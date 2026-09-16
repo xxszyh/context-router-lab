@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import pytest
+
 from context_router.evaluation.judge import (
     CoverageJudge,
     JudgeOutcome,
     JudgePair,
+    LLMJudge,
     Verdict,
     build_judge_prompt,
+    parse_verdict,
     run_pairwise_judging,
     summarise_wins,
 )
+from context_router.providers.openai_compatible import AnswerResult
 
 
 def pair(
@@ -167,3 +172,65 @@ def test_summary_counts_wins_and_reports_order_agreement() -> None:
     assert tally["hybrid_router"]["win_rate"] == 0.5
     assert tally["full_history"]["losses"] == 1
     assert tally["full_history"]["order_agreement"] == 0.5
+
+
+class _ScriptedModel:
+    """Returns canned judge replies so the parsing and counting can be tested offline."""
+
+    model_version = "scripted-judge-model"
+
+    def __init__(self, replies: list[str]) -> None:
+        self.replies = list(replies)
+        self.prompts: list[str] = []
+
+    def run(self, *, prompt: str, instructions: str) -> AnswerResult:
+        del instructions
+        self.prompts.append(prompt)
+        text = self.replies.pop(0) if self.replies else ""
+        return AnswerResult(
+            text=text,
+            model=self.model_version,
+            input_tokens=10,
+            output_tokens=5,
+            total_tokens=15,
+            stop_reason="end_turn",
+            raw_response={},
+        )
+
+
+@pytest.mark.parametrize(
+    ("reply", "expected"),
+    [
+        ('{"winner": "a", "reason": "covers more"}', "a"),
+        ('```json\n{"winner": "b", "reason": "x"}\n```', "b"),
+        ('Here is my verdict: {"winner": "tie", "reason": "equivalent"}', "tie"),
+        ("winner: a", "a"),
+        ("Winner: B", "b"),
+        ("  a  ", "a"),
+        ("The better answer is B.", None),
+        ("", None),
+    ],
+)
+def test_verdict_parsing_tolerates_real_reply_shapes(reply: str, expected: str | None) -> None:
+    assert parse_verdict(reply) == expected
+
+
+def test_an_unparseable_reply_is_counted_not_silently_called_a_tie() -> None:
+    """An unreadable judge is a broken instrument, not agreement."""
+
+    judge = LLMJudge(_ScriptedModel(["I refuse to pick."]))
+
+    assert judge.compare(query="q", requirements=["r"], answer_a="A", answer_b="B") == "tie"
+    assert judge.parse_failures == 1
+
+
+def test_the_llm_judge_forwards_the_blinded_prompt_and_accumulates_usage() -> None:
+    model = _ScriptedModel(['{"winner": "a", "reason": "x"}'])
+    judge = LLMJudge(model)
+
+    assert judge.compare(query="q", requirements=["r"], answer_a="AAA", answer_b="BBB") == "a"
+    assert judge.model_version == "llm-judge:scripted-judge-model"
+    assert "AAA" in model.prompts[0] and "BBB" in model.prompts[0]
+    assert "hybrid_router" not in model.prompts[0]
+    assert judge.input_tokens == 10
+    assert judge.output_tokens == 5

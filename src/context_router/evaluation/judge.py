@@ -15,11 +15,14 @@ judge's verdicts have something to be compared against; it is not a substitute f
 
 from __future__ import annotations
 
+import json
+import re
 from statistics import fmean
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 
 from context_router.domain import Contract
 from context_router.evaluation.scoring import deterministic_coverage
+from context_router.providers.openai_compatible import AnswerResult
 
 Verdict = Literal["a", "b", "tie"]
 
@@ -98,6 +101,74 @@ class CoverageJudge:
         if score_b > score_a:
             return "b"
         return "tie"
+
+
+class VerdictModel(Protocol):
+    """Anything that runs a prompt and hands back the raw reply."""
+
+    model_version: str
+
+    def run(self, *, prompt: str, instructions: str) -> AnswerResult: ...
+
+
+_JSON_OBJECT = re.compile(r"\{[^{}]*\}", re.S)
+_LABELLED = re.compile(r"\b(?:winner|verdict)\b\s*[:：]\s*[\"']?(a|b|tie)\b", re.I)
+_BARE = re.compile(r"^\s*[\"']?(a|b|tie)[\"']?\s*[.!]?\s*$", re.I)
+
+
+def parse_verdict(text: str) -> Verdict | None:
+    """Recover the winner from a judge reply, tolerating fences and surrounding prose.
+
+    Returns None rather than guessing: a verdict that cannot be read is not a tie, and the
+    caller counts it as a parse failure so an unparseable judge shows up as a broken
+    instrument instead of as agreement.
+    """
+
+    for match in _JSON_OBJECT.finditer(text):
+        try:
+            payload = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            continue
+        winner = str(payload.get("winner", "")).strip().lower()
+        if winner in ("a", "b", "tie"):
+            return cast(Verdict, winner)
+    labelled = _LABELLED.search(text)
+    if labelled:
+        return cast(Verdict, labelled.group(1).lower())
+    bare = _BARE.match(text)
+    if bare:
+        return cast(Verdict, bare.group(1).lower())
+    return None
+
+
+class LLMJudge:
+    """A blinded pairwise judge backed by a real model.
+
+    The prompt is built by ``build_judge_prompt``, which takes no arm name and no token
+    count, so this class cannot leak what it is not given.
+    """
+
+    def __init__(self, model: VerdictModel) -> None:
+        self.model = model
+        self.model_version = f"llm-judge:{model.model_version}"
+        self.parse_failures = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
+
+    def compare(
+        self, *, query: str, requirements: list[str], answer_a: str, answer_b: str
+    ) -> Verdict:
+        prompt = build_judge_prompt(
+            query=query, requirements=requirements, answer_a=answer_a, answer_b=answer_b
+        )
+        result = self.model.run(prompt=prompt, instructions=JUDGE_INSTRUCTIONS)
+        self.input_tokens += result.input_tokens
+        self.output_tokens += result.output_tokens
+        verdict = parse_verdict(result.text)
+        if verdict is None:
+            self.parse_failures += 1
+            return "tie"
+        return verdict
 
 
 def _flip(verdict: Verdict) -> Verdict:

@@ -32,6 +32,64 @@ def _extract_text(payload: dict[str, Any]) -> str:
     return "".join(parts)
 
 
+class AnthropicCompatibleVerdictModel:
+    """Runs a prompt and returns the raw reply, for callers that parse their own output.
+
+    Separate from the answer provider because a judge wants a different token budget and a
+    deterministic sampler, and because the caller -- not this adapter -- owns the prompt.
+    """
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        model: str,
+        auth_style: AuthStyle = "bearer",
+        client: httpx.Client | None = None,
+        timeout: float = 120.0,
+        max_tokens: int = 512,
+    ) -> None:
+        self.model_version = require_pinned_model(model)
+        self.base_url = base_url.rstrip("/")
+        self.client = client or httpx.Client(timeout=timeout)
+        self.max_tokens = max_tokens
+        auth = (
+            {"Authorization": f"Bearer {api_key}"}
+            if auth_style == "bearer"
+            else {"x-api-key": api_key}
+        )
+        self.headers = {
+            **auth,
+            "anthropic-version": ANTHROPIC_VERSION,
+            "Content-Type": "application/json",
+        }
+
+    def run(self, *, prompt: str, instructions: str) -> AnswerResult:
+        body = {
+            "model": self.model_version,
+            "max_tokens": self.max_tokens,
+            "temperature": 0.0,
+            "system": instructions,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        response = self.client.post(f"{self.base_url}/v1/messages", headers=self.headers, json=body)
+        response.raise_for_status()
+        payload = response.json()
+        usage = payload.get("usage") or {}
+        input_tokens = int(usage.get("input_tokens", 0))
+        output_tokens = int(usage.get("output_tokens", 0))
+        return AnswerResult(
+            text=_extract_text(payload),
+            model=str(payload.get("model", self.model_version)),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=input_tokens + output_tokens,
+            stop_reason=payload.get("stop_reason"),
+            raw_response=payload,
+        )
+
+
 class AnthropicCompatibleAnswerProvider:
     """Stateless messages adapter; callers own all cross-turn context assembly."""
 

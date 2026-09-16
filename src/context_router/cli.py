@@ -33,9 +33,15 @@ from context_router.evaluation import (
     first_gate,
     quality_token_frontier,
     run_arm,
+    run_pairwise_judging,
+    summarise_wins,
 )
+from context_router.evaluation.judge import JudgePair, LLMJudge
 from context_router.providers import HashEmbeddingProvider
-from context_router.providers.anthropic import AnthropicCompatibleAnswerProvider
+from context_router.providers.anthropic import (
+    AnthropicCompatibleAnswerProvider,
+    AnthropicCompatibleVerdictModel,
+)
 from context_router.routing import ContextRouter
 from context_router.routing.calibration import PlattContextRanker
 from context_router.routing.policy import PolicyObservation, SelectionPolicyTuner
@@ -310,6 +316,92 @@ def answer_experiment_command(
     }
     _write_json(output, payload)
     typer.echo(str(output))
+
+
+@app.command("judge-answers")
+def judge_answers_command(
+    answers: Annotated[Path, typer.Argument(help="Output of answer-experiment")],
+    output: Annotated[Path, typer.Argument()],
+    arm_a: Annotated[str, typer.Option(help="First arm in each pair")] = "hybrid_router",
+    arm_b: Annotated[str, typer.Option(help="Second arm in each pair")] = "query_recent_only",
+    limit: Annotated[int, typer.Option(min=1)] = 20,
+    model: Annotated[str | None, typer.Option(help="Pinned model id")] = None,
+    base_url: Annotated[str | None, typer.Option()] = None,
+    auth_style: Annotated[str, typer.Option(help="bearer or x-api-key")] = "bearer",
+    max_tokens: Annotated[int, typer.Option(min=64)] = 512,
+) -> None:
+    """Blind-judge two arms' answers pairwise, in both orders, and tally the wins.
+
+    Reads the saved answer records rather than the dataset, so re-judging after fixing the
+    judge costs calls but never re-runs the answers.
+    """
+
+    api_key = os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
+    resolved_base = base_url or os.environ.get("ANTHROPIC_BASE_URL", "")
+    resolved_model = model or os.environ.get("ANTHROPIC_MODEL", "")
+    if not (api_key and resolved_base and resolved_model):
+        raise typer.BadParameter("need ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL and a model")
+    payload = json.loads(answers.read_text(encoding="utf-8"))
+    by_sample: dict[str, dict[str, Any]] = {}
+    for row in payload["records"]:
+        by_sample.setdefault(row["sample_id"], {})[row["arm"]] = row
+    pairs: list[JudgePair] = []
+    for sample_id, arms in by_sample.items():
+        if arm_a in arms and arm_b in arms:
+            left, right = arms[arm_a], arms[arm_b]
+            pairs.append(
+                JudgePair(
+                    sample_id=sample_id,
+                    query=left["query"],
+                    requirements=list(left["answer_requirements"]),
+                    arm_a=arm_a,
+                    arm_b=arm_b,
+                    answer_a=left["answer"],
+                    answer_b=right["answer"],
+                )
+            )
+        if len(pairs) >= limit:
+            break
+    if not pairs:
+        raise typer.BadParameter(f"no checkpoint has both {arm_a} and {arm_b}")
+    judge = LLMJudge(
+        AnthropicCompatibleVerdictModel(
+            base_url=resolved_base,
+            api_key=api_key,
+            model=resolved_model,
+            auth_style=auth_style,  # type: ignore[arg-type]
+            max_tokens=max_tokens,
+        )
+    )
+    typer.echo(
+        f"{len(pairs)} pairs x 2 orders = {len(pairs) * 2} judge calls; model={resolved_model}"
+    )
+    outcomes = run_pairwise_judging(judge, pairs, swap=True)
+    tally = summarise_wins(outcomes)
+    for outcome in outcomes:
+        typer.echo(
+            f"  {outcome.sample_id:<16} winner={outcome.winner:<5} agreement={outcome.agreement}"
+        )
+    _write_json(
+        output,
+        {
+            "schema_version": "1.0",
+            "judge_model": resolved_model,
+            "arm_a": arm_a,
+            "arm_b": arm_b,
+            "pairs": len(pairs),
+            "agreed": sum(1 for outcome in outcomes if outcome.agreement),
+            "ties": sum(1 for outcome in outcomes if outcome.winner == "tie"),
+            "parse_failures": judge.parse_failures,
+            "judge_input_tokens": judge.input_tokens,
+            "judge_output_tokens": judge.output_tokens,
+            "tally": tally,
+            "outcomes": [outcome.model_dump(mode="json") for outcome in outcomes],
+        },
+    )
+    typer.echo(str(output))
+    if judge.parse_failures:
+        typer.echo(f"WARNING: {judge.parse_failures} unparseable judge replies")
 
 
 @app.command("benchmark")

@@ -56,6 +56,9 @@ class AnswerRecord(Contract):
     sample_id: str
     session_id: str
     query: str
+    #: Carried on the record so an answer can be judged from the record alone, without
+    #: rebuilding the dataset the requirements came from.
+    answer_requirements: list[str]
     answer: str
     model: str
     memory_tokens: int = Field(ge=0)
@@ -102,6 +105,7 @@ def answer_one(
         sample_id=case.sample_id,
         session_id=case.session_id,
         query=case.query,
+        answer_requirements=list(case.answer_requirements),
         answer=result.text,
         model=result.model,
         memory_tokens=built.memory_tokens,
