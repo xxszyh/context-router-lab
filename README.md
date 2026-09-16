@@ -79,9 +79,11 @@ ctxlab compare-baselines run/events.sqlite run/dataset/benchmark.jsonl run/arms.
 ctxlab report            run/arms.json run/arms_report.md
 ```
 
-`generate-synthetic --sessions 60` produces 60 sessions, 1 020 events and 600 labelled
-query checkpoints. Everything above runs offline and deterministically — no API key, no
-network.
+`generate-synthetic --sessions 60` produces 60 sessions, 8 520 events, 360 contexts and
+780 labelled query checkpoints — six interleaved contexts per session, ~142 events each.
+Full history reaches ~4 400 tokens by the last checkpoint, which is what makes the
+2 048-token budget bite. Everything above runs offline and deterministically — no API
+key, no network. `compare-baselines` takes about 35 s for all 780 checkpoints.
 
 Routing-only commands against a real pinned model live separately:
 
@@ -102,23 +104,23 @@ comparable.
 
 | Arm | Mean memory tokens | Median | vs Full history | Evidence recall | Future leakage |
 |---|---:|---:|---:|---:|---:|
-| `query_recent_only` | 59.4 | 58.5 | 73.6% | 0.300 | 0 |
-| `full_history` | 225.4 | 221.5 | 0.0% | 1.000 | 0 |
-| `sliding_window` | 154.2 | 154.5 | 31.6% | 0.700 | 0 |
-| `summary_recent` | 161.4 | 160.5 | 28.4% | 0.300 | 0 |
-| `global_bm25` | 182.1 | 188.5 | 19.2% | 1.000 | 0 |
-| `global_dense` | 208.5 | 202.5 | 7.5% | 1.000 | 0 |
-| `global_hybrid` | 209.7 | 202.5 | 7.0% | 1.000 | 0 |
-| `hybrid_router` | 212.8 | 255.5 | 5.6% | 1.000 | 0 |
-| `oracle_router` | 128.8 | 131.5 | **42.9%** | 1.000 | 0 |
+| `query_recent_only` | 135.5 | 138.0 | 95.4% | 0.462 | 0 |
+| `full_history` | 2 968.7 | 2 920.5 | 0.0% | 1.000 | 0 |
+| `sliding_window` | 335.5 | 334.0 | 88.7% | 0.538 | 0 |
+| `summary_recent` | 221.3 | 236.0 | 92.5% | 0.462 | 0 |
+| `global_bm25` | 773.0 | 793.5 | 74.0% | 1.000 | 0 |
+| `global_dense` | 789.7 | 821.5 | 73.4% | 0.923 | 0 |
+| `global_hybrid` | 789.2 | 807.5 | 73.4% | 0.949 | 0 |
+| `hybrid_router` | 1 043.3 | 899.0 | 64.9% | 0.744 | 0 |
+| `oracle_router` | 603.4 | 560.0 | **79.7%** | 1.000 | 0 |
 
-Measured on the 600-checkpoint synthetic dataset at a 2 048-token budget.
+Measured on the 780-checkpoint synthetic dataset at a 2 048-token budget.
 
 ### Gate one: is selective context worth a router?
 
 | Criterion | Result |
 |---|---|
-| Oracle token reduction vs full history | **42.9%** (target >= 30%) |
+| Oracle token reduction vs full history | **79.7%** (target >= 30%) |
 | Oracle evidence recall vs full history | not worse (1.000 vs 1.000) |
 | Future-event leakage, all arms | 0 |
 | Answer quality | **not yet measured** |
@@ -127,16 +129,25 @@ Measured on the 600-checkpoint synthetic dataset at a 2 048-token budget.
 The gate is deliberately answerable offline. Its answer-quality criterion needs a run
 against a pinned main model and is reported as unverified rather than assumed.
 
-**Read the table before trusting it.** The honest summary of this first slice:
+**Read the table before trusting it.** Three things in it matter more than the ranking:
 
-- The oracle proves the architecture has headroom — 42.9% of memory tokens can go
-  without losing a single labelled evidence set.
-- The learned router does **not** yet capture that headroom: it reaches full-history
-  recall but saves only 5.6%, because it selects nearly every context and the 2 048-token
-  budget never binds on 17-event sessions.
-- `global_bm25` is competitive with the router while touching no context structure at all.
-  That is the strongest signal in the table, and it says the routing problem here is
-  currently too easy.
+- **Cheap is not the same as good.** The three cheapest arms save 89–95% of memory
+  tokens and recover only 46–54% of the labelled evidence. `query_recent_only` at 95.4%
+  savings is not a result, it is a failure that happens to be small. Any claim resting on
+  token reduction alone is worthless here.
+- **The oracle proves the architecture, and by a wide margin.** 79.7% of memory tokens
+  can go while keeping every evidence set. So selective context assembly is worth
+  building — gate one passes on substance, not on a technicality.
+- **The learned router is currently dominated by plain BM25.** It spends *more* tokens
+  than `global_bm25` (1 043 vs 773) and recovers *less* evidence (0.744 vs 1.000). The
+  routing step is discarding evidence that flat lexical retrieval keeps, which is the
+  concrete defect to fix next. This, not the oracle, is the finding.
+
+A fourth signal sits in the dense rows: `global_dense` (0.923) and `global_hybrid`
+(0.949) land *below* `global_bm25` (1.000), so fusing the embedding in actively hurts.
+That is measured evidence that the default hashing embedder carries no semantics — see
+limitation 2 below — and it means the dense and hybrid arms should not be read as
+dense-retrieval results at all.
 
 ## Scope of Phase 0–1
 
@@ -157,12 +168,16 @@ any Codex/MCP integration.
 2. **The default embedder is not semantic.** `HashEmbeddingProvider` is a deterministic
    offline placeholder that hashes tokens into a 256-dimension vector. It makes
    `global_dense` and `global_hybrid` *reproducible smoke baselines*, not real dense
-   retrievers. Wire `OpenAICompatibleEmbeddingProvider` before drawing conclusions about
-   dense or hybrid retrieval.
-3. **The synthetic dataset is too easy.** Three contexts per session, short sessions, a
-   budget that never binds. The plan calls for 3–6 contexts and much longer sessions;
-   until the generator is widened, the router has little room to lose and the comparison
-   understates the difficulty.
+   retrievers — and the table above shows it directly, since both score below plain
+   `global_bm25`. Wire `OpenAICompatibleEmbeddingProvider` before drawing any conclusion
+   about dense or hybrid retrieval, or about the router's dense candidate generator.
+3. **The synthetic sessions are still templated.** Six interleaved contexts, evidence up
+   to 17 events behind the checkpoint, tool call/result pairs, cross-context and
+   unresolvable checkpoints are all covered. Not yet covered, from the plan's harder-case
+   list: a conclusion later overturned by a newer turn, the same identifier meaning two
+   different things in two contexts, and a wrong assistant conclusion that must not be
+   trusted. Until those exist, the benchmark cannot separate "found the evidence" from
+   "found the *current* evidence".
 4. **Reference solutions share the model.** The oracle uses the same assembly path as the
    router, so it bounds *implementation* error, not *modelling* error.
 
@@ -216,7 +231,16 @@ Apache-2.0. See [LICENSE](LICENSE).
 前提下，把 query 路由到正确的逻辑 Context 能否减少主模型读到的无关 token。
 
 `compare-baselines` 在统一的 token 计数器、统一的因果截断和统一的标注证据集下横向对比
-九个策略（离线、确定性、不需要 API key）。当前 600 个检查点的结果：**Oracle 可省
-42.9% memory token 且证据召回不降**（第一道门槛通过，说明架构有上限），但**学习型
-Router 只省 5.6%**，因为合成数据集太简单（每会话仅 3 个 Context、预算从不触及）。
-答案质量尚未测量——必须先固定主模型才能下结论。
+九个策略（离线、确定性、不需要 API key）。当前 780 个检查点（60 段会话 × 13）的结果有
+三条最要紧：
+
+1. **省 token 不等于做对了。** 三个最便宜的臂省掉 89–95% 的 memory token，却只召回
+   46–54% 的标注证据。只看 token 降幅的结论在这里没有价值。
+2. **Oracle 以很大余量证明架构成立**：省 79.7% 且证据召回一条不丢，第一道门槛通过。
+3. **学习型 Router 目前被最朴素的 BM25 全面压过**：token 更多（1 043 vs 773）、召回
+   更低（0.744 vs 1.000）。路由这一步丢掉了扁平词法检索能保住的证据——这才是要修的
+   地方，也是本轮的真正发现。
+
+另外 `global_dense`(0.923) 与 `global_hybrid`(0.949) **低于** `global_bm25`(1.000)，
+这正是默认哈希嵌入器不含语义的直接证据：融合进去反而变差。答案质量尚未测量——必须
+先固定主模型才能下结论。

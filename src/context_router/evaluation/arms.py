@@ -284,17 +284,23 @@ def build_arm_cases(
 ) -> list[ArmCase]:
     """Project benchmark checkpoints into causal arm cases, never reading the future."""
 
-    contexts_cache: dict[str, list[FlatContext]] = {}
+    all_contexts = source.list_contexts()
+    session_sequences: dict[str, dict[str, int]] = {}
     cases: list[ArmCase] = []
     for sample in queries:
         session_events = source.list_events(sample.session_id)
-        cached = contexts_cache.get(sample.session_id)
-        if cached is None:
-            known = {event.event_id for event in session_events}
-            cached = [
-                context for context in source.list_contexts() if context.created_at_event in known
-            ]
-            contexts_cache[sample.session_id] = cached
+        sequence_of = session_sequences.get(sample.session_id)
+        if sequence_of is None:
+            sequence_of = {event.event_id: event.sequence for event in session_events}
+            session_sequences[sample.session_id] = sequence_of
+        # A context only exists once its creation event is causal. Filtering on the
+        # whole session instead would show checkpoints contexts from their future.
+        causal_contexts = [
+            context
+            for context in all_contexts
+            if sequence_of.get(context.created_at_event, sample.as_of_sequence + 1)
+            <= sample.as_of_sequence
+        ]
         query_event = source.get_event(sample.query_event_id)
         if query_event is None:
             raise KeyError(f"missing query event: {sample.query_event_id}")
@@ -312,7 +318,7 @@ def build_arm_cases(
                 as_of_sequence=sample.as_of_sequence,
                 events=causal,
                 future_events=future,
-                contexts=cached,
+                contexts=causal_contexts,
                 assignments=source.list_assignments(session_id=sample.session_id, latest_only=True),
                 recent_events=recent,
                 required_context_ids=list(sample.required_context_ids),
@@ -562,6 +568,7 @@ def evaluate_arms(results: list[ArmCaseResult]) -> dict[str, dict[str, float]]:
             "count": float(len(rows)),
             "mean_memory_tokens": mean(tokens),
             "median_memory_tokens": float(median(tokens)),
+            "max_memory_tokens": max(tokens),
             "mean_total_input_tokens": mean(float(row.total_input_tokens) for row in rows),
             "evidence_set_recall": mean(row.evidence_set_recall for row in rows),
             "future_leakage_total": float(sum(row.future_leakage for row in rows)),

@@ -6,6 +6,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from context_router.cli import app
+from context_router.datasets import queries_per_session
 
 runner = CliRunner()
 
@@ -42,7 +43,7 @@ def test_cli_generates_ingests_validates_and_benchmarks_dataset(tmp_path: Path) 
     )
     assert benchmarked.exit_code == 0, benchmarked.output
     results = json.loads(output.read_text(encoding="utf-8"))
-    assert results["metrics"]["count"] == 20
+    assert results["metrics"]["count"] == queries_per_session() * 2
     assert "micro_recall" in results["metrics"]
 
     report = tmp_path / "report.md"

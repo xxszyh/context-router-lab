@@ -45,9 +45,22 @@ def _read_benchmark(path: Path) -> list[BenchmarkQuery]:
         return [BenchmarkQuery.model_validate_json(line) for line in handle if line.strip()]
 
 
-def _session_contexts(store: SQLiteEventStore, session_id: str) -> list[FlatContext]:
-    event_ids = {event.event_id for event in store.list_events(session_id)}
-    return [context for context in store.list_contexts() if context.created_at_event in event_ids]
+def _session_contexts(
+    store: SQLiteEventStore, session_id: str, as_of_sequence: int | None = None
+) -> list[FlatContext]:
+    """Contexts of a session that already exist at the checkpoint.
+
+    Filtering on the whole session would expose contexts created in the future of
+    the checkpoint, which is exactly the leak causal replay exists to prevent.
+    """
+
+    sequence_of = {event.event_id: event.sequence for event in store.list_events(session_id)}
+    cutoff = as_of_sequence if as_of_sequence is not None else max(sequence_of.values(), default=0)
+    return [
+        context
+        for context in store.list_contexts()
+        if sequence_of.get(context.created_at_event, cutoff + 1) <= cutoff
+    ]
 
 
 @app.command("generate-synthetic")
@@ -55,7 +68,7 @@ def generate_synthetic(
     output: Annotated[Path, typer.Argument(help="Output dataset directory")],
     sessions: Annotated[int, typer.Option(min=1)] = 60,
 ) -> None:
-    """Generate deterministic bilingual coding conversations (10 queries/session)."""
+    """Generate deterministic bilingual coding conversations."""
 
     counts = generate_synthetic_dataset(sessions).write(output)
     typer.echo(json.dumps(counts, ensure_ascii=False, sort_keys=True))
@@ -120,7 +133,7 @@ def route_command(
         recent_events=events[-6:],
         primary_context_id=primary,
         recent_context_ids=[],
-        context_catalog=_session_contexts(store, session_id),
+        context_catalog=_session_contexts(store, session_id, cutoff),
         as_of_sequence=cutoff,
     )
     typer.echo(ContextRouter().route(request).model_dump_json(indent=2))
@@ -138,7 +151,7 @@ def assemble_command(
     store = SQLiteEventStore(database)
     events = store.list_events(session_id, as_of_sequence=as_of)
     cutoff = as_of if as_of is not None else (events[-1].sequence if events else 0)
-    contexts = _session_contexts(store, session_id)
+    contexts = _session_contexts(store, session_id, cutoff)
     route_request = RouteRequest(
         query_event_id="cli-query",
         query=query,
@@ -189,7 +202,7 @@ def benchmark_command(
                 recent_events=recent,
                 primary_context_id=sample.primary_context_id,
                 recent_context_ids=sample.recent_context_ids,
-                context_catalog=_session_contexts(store, sample.session_id),
+                context_catalog=_session_contexts(store, sample.session_id, sample.as_of_sequence),
                 as_of_sequence=sample.as_of_sequence,
             )
         )

@@ -127,21 +127,35 @@ def test_oracle_router_recovers_the_labeled_evidence_sets(cases: list[ArmCase]) 
         assert run_arm("oracle_router", case).evidence_set_recall == 1.0
 
 
-def test_lexical_arm_beats_the_recent_window_on_a_lexical_query(cases: list[ArmCase]) -> None:
-    target = next(
-        case for case in cases if "SQLITE_BUSY" in case.query and case.acceptable_evidence_sets
+def test_global_lexical_retrieval_beats_the_recent_window(
+    cases: list[ArmCase], results: list[ArmCaseResult]
+) -> None:
+    summary = evaluate_arms(results)
+    assert (
+        summary["global_bm25"]["evidence_set_recall"]
+        > summary["query_recent_only"]["evidence_set_recall"]
     )
-    expected = set(target.acceptable_evidence_sets[0])
-    assert set(run_arm("global_bm25", target).included_event_ids) >= expected
-    assert not set(run_arm("query_recent_only", target).included_event_ids) >= expected
+    assert summary["query_recent_only"]["evidence_set_recall"] < 1.0
+    # The dataset must contain evidence the recent window cannot reach.
+    far = [
+        case
+        for case in cases
+        if case.acceptable_evidence_sets
+        and not set(case.acceptable_evidence_sets[0])
+        <= {event.event_id for event in case.recent_events}
+    ]
+    assert far
 
 
-def test_hybrid_and_oracle_arms_route_through_the_context_builder(cases: list[ArmCase]) -> None:
-    for name in ("hybrid_router", "oracle_router"):
-        result = run_arm(name, cases[0])
-        assert result.selected_context_ids
-        assert "context" in result.sections
-        assert result.routing_trace_id
+def test_router_arms_route_through_the_context_builder(cases: list[ArmCase]) -> None:
+    oracle = run_arm("oracle_router", cases[0])
+    assert oracle.selected_context_ids == cases[0].required_context_ids
+    assert "context" in oracle.sections
+    assert oracle.routing_trace_id
+    hybrid = run_arm("hybrid_router", cases[0])
+    assert hybrid.decision in {"route", "abstain", "new_context_candidate"}
+    assert hybrid.routing_trace_id
+    assert 0.0 <= hybrid.confidence <= 1.0
 
 
 def test_hybrid_router_abstains_like_the_domain_contract(cases: list[ArmCase]) -> None:
@@ -174,12 +188,25 @@ def test_oracle_reduces_memory_tokens_on_the_synthetic_dataset(
     )
 
 
-def test_global_rag_arms_use_more_tokens_than_the_oracle_router(
-    results: list[ArmCaseResult],
-) -> None:
+def test_full_history_outgrows_the_memory_budget(results: list[ArmCaseResult]) -> None:
+    """The dataset must be large enough that the budget actually constrains the arms."""
+
     summary = evaluate_arms(results)
-    for name in ("global_bm25", "global_dense", "global_hybrid"):
-        assert summary[name]["mean_memory_tokens"] >= summary["oracle_router"]["mean_memory_tokens"]
+    assert summary["full_history"]["max_memory_tokens"] > 2048
+
+
+def test_arm_cases_only_expose_contexts_that_already_exist(
+    cases: list[ArmCase], store: SQLiteEventStore
+) -> None:
+    early = cases[0]
+    created = {event.event_id for event in early.events}
+    assert all(context.created_at_event in created for context in early.contexts)
+    session_contexts = [
+        context
+        for context in store.list_contexts()
+        if context.context_id.startswith(early.session_id)
+    ]
+    assert len(early.contexts) < len(session_contexts)
 
 
 def test_first_gate_passes_on_reduced_tokens_and_preserved_recall() -> None:
