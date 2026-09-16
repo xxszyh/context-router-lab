@@ -27,10 +27,20 @@ from context_router.providers.openai_compatible import AnswerResult
 Verdict = Literal["a", "b", "tie"]
 
 JUDGE_INSTRUCTIONS = (
-    "You are comparing two candidate answers to the same question about a software project. "
-    "You are not told how either answer was produced, and that information is deliberately "
-    "withheld: judge only what the answers say. Use the requirement list as the rubric. "
-    'Reply with JSON only: {"winner": "a" | "b" | "tie", "reason": "<one sentence>"}.'
+    "You compare two candidate answers to the same question about a software project. You are "
+    "not told how either was produced and that information is deliberately withheld: judge "
+    "only what the answers say.\n\n"
+    "Procedure, in this order:\n"
+    "1. For each requirement, decide whether Answer A satisfies it, and whether Answer B "
+    "does. Work through the requirements one at a time.\n"
+    "2. An answer satisfies a requirement only if it is actually addressed. Repeating a "
+    "requirement's wording while saying the answer cannot be given does NOT satisfy it.\n"
+    '3. Winner: "a" if A satisfies strictly more requirements; "b" if B does; "tie" only if '
+    "both satisfy the same requirements and neither is more correct.\n\n"
+    "The order the answers appear in carries no information, and deciding differently when "
+    "they are swapped is an error.\n\n"
+    "End your reply with exactly one line and nothing after it:\n"
+    "WINNER: <a|b|tie>"
 )
 
 
@@ -138,12 +148,14 @@ def parse_verdict(text: str) -> Verdict | None:
         winner = str(payload.get("winner", "")).strip().lower()
         if winner in ("a", "b", "tie"):
             return cast(Verdict, winner)
-    truncated = _TRUNCATED.search(text)
+    # The last mention wins: the judge is told to end with its verdict, so anything
+    # earlier is reasoning about the verdict rather than the verdict.
+    truncated = _TRUNCATED.findall(text)
     if truncated:
-        return cast(Verdict, truncated.group(1).lower())
-    labelled = _LABELLED.search(text)
+        return cast(Verdict, truncated[-1].lower())
+    labelled = _LABELLED.findall(text)
     if labelled:
-        return cast(Verdict, labelled.group(1).lower())
+        return cast(Verdict, labelled[-1].lower())
     bare = _BARE.match(text)
     if bare:
         return cast(Verdict, bare.group(1).lower())

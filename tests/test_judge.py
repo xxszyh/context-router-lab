@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from context_router.evaluation.judge import (
+    JUDGE_INSTRUCTIONS,
     CoverageJudge,
     JudgeOutcome,
     JudgePair,
@@ -287,3 +288,40 @@ def test_the_coverage_judge_is_order_invariant_unlike_a_model() -> None:
 
     assert [o.agreement for o in outcomes] == [True, True]
     assert [o.winner for o in outcomes] == ["a", "b"], "resolved onto arms, not positions"
+
+
+def test_the_last_verdict_mention_wins_over_an_earlier_one() -> None:
+    """The judge is told to end with its verdict, so an earlier mention is reasoning."""
+
+    reasoning_then_verdict = (
+        "Requirement 1: A addresses it, B does not, so on that basis winner: a.\n"
+        "Requirement 2: neither addresses it.\n"
+        "WINNER: b"
+    )
+
+    assert parse_verdict(reasoning_then_verdict) == "b"
+
+
+def test_the_judge_is_told_to_anchor_its_verdict_in_the_requirements() -> None:
+    """20% order disagreement means the verdict was not anchored in content.
+
+    The instructions must define a tie, forbid counting an echoed requirement as satisfied,
+    and require a final verdict line -- each of which gives the decision something to rest
+    on other than the position the answers happened to appear in.
+    """
+
+    lowered = JUDGE_INSTRUCTIONS.lower()
+    assert "tie" in lowered and "same requirements" in lowered
+    assert "does not satisfy" in lowered, "the echoed-refusal loophole must be closed"
+    assert "winner: <a|b|tie>" in lowered
+    assert "order" in lowered and "swapped" in lowered
+
+
+def test_the_instructions_are_in_the_blinded_judge_prompt_path() -> None:
+    """The procedure must reach the model without the prompt builder learning about arms."""
+
+    model = _ScriptedModel(["WINNER: a"])
+    judge = LLMJudge(model)
+
+    assert judge.compare(query="q", requirements=["r"], answer_a="A", answer_b="B") == "a"
+    assert "hybrid_router" not in model.prompts[0]
