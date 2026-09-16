@@ -125,10 +125,58 @@ retrying an unreadable reply once, and by raising the judge budget to 2048.
 |---|---:|---:|
 | 1 | 14 / 40 | 14 |
 | 2 | 7 / 40 | 7 |
-| 3 | 4 / 40 | **1** |
+| 3 | 4 / 40 | 1 |
+| 4 | 7 / 40 | **2** |
 
-In run 3 the four unreadable replies were ~8 500-character thinking transcripts that never
-reached a verdict — the model thought past its budget. The retry recovered three of them.
+In runs 3 and 4 the unreadable replies were 8 000–9 000-character thinking transcripts that
+never reached a verdict — the model thought past its 2 048-token budget. The retry recovered
+most of them. The count rose in run 4 because the procedure below asks the judge to work
+through the requirements one at a time, which is more thinking, and the budget did not grow
+with it.
+
+### Fixing the order agreement
+
+80% is not a request to be more consistent. It means the decision had nothing to rest on but
+position, so the instructions now give it something:
+
+1. work through the requirements one at a time, deciding for each whether A satisfies it and
+   whether B does, so the verdict derives from a content assessment;
+2. an answer satisfies a requirement only if it is actually addressed — echoing the wording
+   while saying the answer cannot be given does **not** count, closing the same loophole the
+   lexical metric fell into;
+3. `tie` is defined (both satisfy the same requirements, neither more correct) instead of
+   being an undefined third option a judge picks when undecided — which is precisely when
+   position decides.
+
+The reply must end with a `WINNER: <a|b|tie>` line, and `parse_verdict` now takes the **last**
+mention: with the verdict pinned to the end, an earlier mention is reasoning about it.
+
+| | run 3 | run 4 |
+|---|---:|---:|
+| order agreement | 16 / 20 (80%) | **18 / 20 (90%)** |
+| wins `hybrid` / `cheap` / ties | 10 / 2 / 8 | 9 / 2 / 9 |
+| ties that were *agreed* | 4 | **7** |
+| verdicts that changed at all | — | **1 of 20** |
+| agreement with the free `CoverageJudge` | 14 / 20 | 13 / 20 |
+
+**The improvement is substantive rather than a hedge.** Only one of twenty verdicts changed,
+so the judge did not simply start calling more ties; three pairs that previously reached
+their verdict *via* a swap disagreement now reach the same verdict stably, and the tied
+outcome is unchanged. The consistency came from the mechanism, not from the answer.
+
+One pair went the other way: `syn-000-q-03` was a stable `a` and is now an unstable `tie`.
+Both answers declined there, so rewarding one of them — which run 3 did — was the
+loophole instruction 2 closes. **The new behaviour is the more correct one even though it is
+the less consistent one**, which is worth stating plainly rather than presenting the 90% as
+an unqualified win.
+
+The judge also moved slightly further from the free heuristic (70% → 65% agreement), which is
+what exercising more independent judgement looks like.
+
+**90% is still not good.** One verdict in ten still flips with the order the answers appear
+in, and the no-verdict rate rose because the procedure is more thinking than the budget
+allowed. Both are fixable — the second by raising the budget to match the thinking the
+instructions provoke — and neither is fixed yet.
 
 ### Judge result (run 3, stable with run 2)
 
@@ -291,7 +339,10 @@ Not established:
    analysis, then re-measure the order agreement on the same 20 pairs.
 3. **Report refusal checkpoints separately** instead of mixing them into the win table,
    since they are 5 of the 8 ties and all 6 judge disagreements.
-4. **Only then scale the sample**, and only against a documented model.
+4. **Raise the judge's budget to match the thinking its instructions provoke.** Thinking
+   is now 8 000–9 000 characters ≈ 2 000–2 500 tokens against a 2 048 cap, so replies are
+   being lost to a limit the procedure itself made too small.
+5. **Only then scale the sample**, and only against a documented model.
 
 ---
 
