@@ -249,13 +249,26 @@ def test_a_reply_cut_off_mid_json_still_yields_its_winner() -> None:
 
 
 def test_unparseable_replies_are_kept_for_diagnosis() -> None:
-    """The first judge run lost 14 of 40 replies with no way to see what they said."""
+    """The first judge run lost 40 replies with no way to see what they said."""
 
-    model = _ScriptedModel(["garbage one", '{"winner": "a", "reason": "x"}'])
-    judge = LLMJudge(model)
+    model = _ScriptedModel(["garbage one", "still garbage"])
+    judge = LLMJudge(model, retries=1)
 
-    judge.compare(query="q", requirements=["r"], answer_a="A", answer_b="B")
-    judge.compare(query="q", requirements=["r"], answer_a="A", answer_b="B")
-
-    assert judge.replies == ["garbage one", '{"winner": "a", "reason": "x"}']
+    assert judge.compare(query="q", requirements=["r"], answer_a="A", answer_b="B") == "tie"
+    assert judge.replies == ["garbage one", "still garbage"]
     assert judge.parse_failures == 1
+
+
+def test_an_empty_reply_is_retried_rather_than_losing_the_pair() -> None:
+    """7 of 40 judge calls returned nothing at all; a retry is cheaper than a lost pair.
+
+    The model spends its output budget on a thinking block first, so when the thinking runs
+    long it emits no text block and the reply is empty.
+    """
+
+    model = _ScriptedModel(["", '{"winner": "b", "reason": "x"}'])
+    judge = LLMJudge(model, retries=1)
+
+    assert judge.compare(query="q", requirements=["r"], answer_a="A", answer_b="B") == "b"
+    assert judge.parse_failures == 0
+    assert judge.replies == ["", '{"winner": "b", "reason": "x"}']

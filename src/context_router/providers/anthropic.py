@@ -20,16 +20,30 @@ AuthStyle = Literal["bearer", "x-api-key"]
 ANTHROPIC_VERSION = "2023-06-01"
 
 
-def _extract_text(payload: dict[str, Any]) -> str:
-    """Join the text blocks of a messages response, ignoring thinking blocks."""
-
+def _blocks_of_type(payload: dict[str, Any], kind: str, field: str) -> str:
     parts: list[str] = []
     for block in payload.get("content", []):
-        if not isinstance(block, dict):
-            continue
-        if block.get("type") == "text" and isinstance(block.get("text"), str):
-            parts.append(block["text"])
+        if isinstance(block, dict) and block.get("type") == kind:
+            value = block.get(field)
+            if isinstance(value, str):
+                parts.append(value)
     return "".join(parts)
+
+
+def _extract_text(payload: dict[str, Any], *, include_thinking: bool = False) -> str:
+    """Join the text blocks of a messages response.
+
+    ``include_thinking`` is the fallback for a reply with no text block at all: thinking
+    blocks count against the same output budget, so a model that thinks for long enough
+    emits none, and the answer -- or the verdict -- is left inside the thinking. A caller
+    that parses a specific field out of the reply can use this safely; one that shows the
+    text to a human cannot, because the thinking is deliberation rather than an answer.
+    """
+
+    text = _blocks_of_type(payload, "text", "text")
+    if text or not include_thinking:
+        return text
+    return _blocks_of_type(payload, "thinking", "thinking")
 
 
 class AnthropicCompatibleVerdictModel:
@@ -80,7 +94,10 @@ class AnthropicCompatibleVerdictModel:
         input_tokens = int(usage.get("input_tokens", 0))
         output_tokens = int(usage.get("output_tokens", 0))
         return AnswerResult(
-            text=_extract_text(payload),
+            # A verdict is machine-parsed, so recovering it from the thinking is safe and
+            # better than losing it. The answer provider below deliberately does not do
+            # this: a human should never be shown deliberation as if it were an answer.
+            text=_extract_text(payload, include_thinking=True),
             model=str(payload.get("model", self.model_version)),
             input_tokens=input_tokens,
             output_tokens=output_tokens,

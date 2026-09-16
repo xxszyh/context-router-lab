@@ -157,8 +157,9 @@ class LLMJudge:
     count, so this class cannot leak what it is not given.
     """
 
-    def __init__(self, model: VerdictModel) -> None:
+    def __init__(self, model: VerdictModel, *, retries: int = 1) -> None:
         self.model = model
+        self.retries = retries
         self.model_version = f"llm-judge:{model.model_version}"
         self.parse_failures = 0
         self.input_tokens = 0
@@ -173,15 +174,17 @@ class LLMJudge:
         prompt = build_judge_prompt(
             query=query, requirements=requirements, answer_a=answer_a, answer_b=answer_b
         )
-        result = self.model.run(prompt=prompt, instructions=JUDGE_INSTRUCTIONS)
-        self.input_tokens += result.input_tokens
-        self.output_tokens += result.output_tokens
-        self.replies.append(result.text)
-        verdict = parse_verdict(result.text)
-        if verdict is None:
-            self.parse_failures += 1
-            return "tie"
-        return verdict
+        # Retried because an empty reply is transient: a judge run lost 7 of 40 to it.
+        for _ in range(self.retries + 1):
+            result = self.model.run(prompt=prompt, instructions=JUDGE_INSTRUCTIONS)
+            self.input_tokens += result.input_tokens
+            self.output_tokens += result.output_tokens
+            self.replies.append(result.text)
+            verdict = parse_verdict(result.text)
+            if verdict is not None:
+                return verdict
+        self.parse_failures += 1
+        return "tie"
 
 
 def _flip(verdict: Verdict) -> Verdict:

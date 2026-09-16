@@ -328,7 +328,7 @@ def judge_answers_command(
     model: Annotated[str | None, typer.Option(help="Pinned model id")] = None,
     base_url: Annotated[str | None, typer.Option()] = None,
     auth_style: Annotated[str, typer.Option(help="bearer or x-api-key")] = "bearer",
-    max_tokens: Annotated[int, typer.Option(min=64)] = 1024,
+    max_tokens: Annotated[int, typer.Option(min=64)] = 2048,
 ) -> None:
     """Blind-judge two arms' answers pairwise, in both orders, and tally the wins.
 
