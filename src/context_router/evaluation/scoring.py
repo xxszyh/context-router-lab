@@ -19,26 +19,59 @@ _QUOTED = re.compile(r"「([^」]+)」")
 REFUSAL_PREFIX = "说明上下文不足"
 
 #: Cues that count as declining to answer rather than fabricating one, in both languages
-#: the benchmark uses.
+#: the benchmark uses. These are the phrasings the first real run actually produced, which
+#: is why they include stance verbs like 没有说明 and 未给出 rather than only the obvious
+#: 无法回答: the model tended to state that the context *lacks* something and then reason
+#: from that, rather than announcing that it refuses.
+#:
+#: This is a heuristic and it errs in both directions -- it will flag a real answer that
+#: says "无法确定 X，但 Y 是..." as a decline, and miss a decline phrased some way not
+#: listed here. That is the measured reason a blinded judge is still required, and why
+#: callers should report coverage and declining side by side rather than collapsing them.
 REFUSAL_CUES = (
     "无法回答",
+    "无法确定",
+    "无法判断",
+    "无法据此",
+    "不能确定",
     "不足以",
+    "没有说明",
     "没有提到",
+    "没有相关",
+    "没有关于",
     "未提及",
     "未讨论",
-    "没有相关",
-    "无法确定",
+    "未给出",
+    "不包含",
     "上下文不足",
     "cannot answer",
+    "cannot determine",
     "not enough information",
     "no information",
     "does not contain",
+    "does not mention",
+    "unable to",
     "insufficient",
 )
 
 
 def is_refusal_requirement(requirement: str) -> bool:
     return requirement.startswith(REFUSAL_PREFIX)
+
+
+def is_refusal(answer: str) -> bool:
+    """Whether the answer declines to answer.
+
+    Needed because the lexical check alone is fooled by an answer that paraphrases the
+    requirement's own terms while explaining that it cannot meet them. That pattern scored
+    full marks in the first real run, on one answer in five, and it flattered whichever arm
+    quoted the requirement back most fluently. Callers can therefore report coverage and
+    declining separately and let a reader see the difference rather than trusting one
+    number.
+    """
+
+    lowered = answer.lower()
+    return any(cue.lower() in lowered for cue in REFUSAL_CUES)
 
 
 def requirement_terms(requirement: str) -> list[str]:

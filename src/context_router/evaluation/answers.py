@@ -27,7 +27,7 @@ from context_router.evaluation.arms import (
     assemble_arm,
     build_arm_cases,
 )
-from context_router.evaluation.scoring import deterministic_coverage
+from context_router.evaluation.scoring import deterministic_coverage, is_refusal
 from context_router.providers.openai_compatible import AnswerResult
 from context_router.routing import ContextRouter
 
@@ -63,6 +63,10 @@ class AnswerRecord(Contract):
     output_tokens: int = Field(ge=0)
     total_tokens: int = Field(ge=0)
     coverage: float = Field(ge=0.0, le=1.0)
+    #: Coverage with a declining answer counted as zero on an answerable checkpoint, so a
+    #: fluent "I cannot tell from this" cannot pass as an answer by echoing the rubric.
+    strict_coverage: float = Field(ge=0.0, le=1.0)
+    refused: bool
     must_abstain: bool
     context_sha256: str
     truncated: bool
@@ -90,6 +94,9 @@ def answer_one(
         query=case.query, working_context=built.rendered_text, instructions=instructions
     )
     latency = time.perf_counter() - started
+    coverage = deterministic_coverage(case.answer_requirements, result.text)
+    refused = is_refusal(result.text)
+    answerable = bool(case.required_context_ids)
     return AnswerRecord(
         arm=arm,
         sample_id=case.sample_id,
@@ -101,8 +108,10 @@ def answer_one(
         input_tokens=result.input_tokens,
         output_tokens=result.output_tokens,
         total_tokens=result.total_tokens,
-        coverage=deterministic_coverage(case.answer_requirements, result.text),
-        must_abstain=not case.required_context_ids,
+        coverage=coverage,
+        strict_coverage=coverage if (answerable or not refused) else 0.0,
+        refused=refused,
+        must_abstain=not answerable,
         context_sha256=hashlib.sha256(built.rendered_text.encode("utf-8")).hexdigest()[:16],
         truncated=result.stop_reason in TRUNCATION_STOP_REASONS,
         latency_seconds=latency,
@@ -134,6 +143,12 @@ def evaluate_answers(records: list[AnswerRecord]) -> dict[str, dict[str, float]]
         summary[arm] = {
             "count": float(len(rows)),
             "mean_coverage": fmean(row.coverage for row in rows),
+            "mean_strict_coverage": fmean(row.strict_coverage for row in rows),
+            "refusal_rate": _mean_or_zero([float(row.refused) for row in rows]),
+            # Coverage that only counts answers the model actually attempted.
+            "mean_attempted_coverage": _mean_or_zero(
+                [row.coverage for row in rows if not row.must_abstain and not row.refused]
+            ),
             "mean_answerable_coverage": _mean_or_zero(
                 [row.coverage for row in rows if not row.must_abstain]
             ),

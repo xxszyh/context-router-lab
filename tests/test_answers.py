@@ -78,6 +78,8 @@ def test_answer_one_records_cost_coverage_and_provenance(cases: list[ArmCase]) -
     assert record.sample_id == case.sample_id
     assert record.model == "stub-model"
     assert record.coverage == 1.0, "the stub echoes its context, so every term is present"
+    assert record.strict_coverage == 1.0
+    assert record.refused is False
     assert record.memory_tokens > 0
     assert record.total_tokens > 0
     assert record.context_sha256
@@ -121,6 +123,8 @@ def test_evaluate_answers_aggregates_per_arm(cases: list[ArmCase]) -> None:
     assert set(summary) == {"oracle_router", "full_history"}
     for row in summary.values():
         assert row["count"] == len(chosen)
+        assert "mean_strict_coverage" in row
+        assert row["refusal_rate"] == 0.0
         assert 0.0 <= row["mean_coverage"] <= 1.0
         assert row["mean_total_tokens"] > 0
         assert row["truncated_rate"] == 0.0
