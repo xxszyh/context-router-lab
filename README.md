@@ -264,9 +264,17 @@ more:
   identical evidence recall, so the oracle's remaining 2× memory advantage buys no
   measurable quality on this sample.
 
-It did **not** establish magnitudes: the judge agrees with itself across answer order only
-80% of the time, about 20% of its calls produced no readable verdict, and 5 of the 8 ties
-are checkpoints where a refusal was the correct answer and neither arm had anything to say.
+It did **not** establish magnitudes, and a free control shows why to be careful with the
+headline. `ctxlab judge-answers --judge coverage` runs the identical swap protocol with a
+deterministic lexical scorer and no model: it produces the **same 10–2–8 tally**, but agrees
+with the paid judge on only **14 of 20 pairs**. The matching total is a coincidence of
+symmetric disagreement, not agreement — comparing methods on the win table alone would have
+concluded the paid judge confirms the free heuristic.
+
+The judge also agrees with itself across answer order only **80%** of the time, about 20% of
+its calls produced no readable verdict across three runs, and 5 of the 8 ties are checkpoints
+where a refusal was the correct answer. **As configured it does not earn its cost**, and the
+order agreement has to be fixed before any sample size means anything.
 
 **These numbers are illustrative and not reproducible.** The model used is a private proxy
 alias, not a documented identifier. Read

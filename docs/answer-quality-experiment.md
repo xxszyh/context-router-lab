@@ -170,7 +170,67 @@ run was for. They do not corroborate magnitudes.
 
 ---
 
-## 5. Findings
+## 5. The control: does the paid judge add anything?
+
+`CoverageJudge` is a deterministic stand-in that runs the identical swap protocol using
+`deterministic_coverage` and no model. It runs for free:
+
+```bash
+ctxlab judge-answers run/answers.json run/judge_coverage.json \
+  --judge coverage --arm-a hybrid_router --arm-b query_recent_only --limit 20
+```
+
+| judge | wins `hybrid` | wins `cheap` | ties | order agreement | parse failures |
+|---|---:|---:|---:|---:|---:|
+| LLM (`deepseek-v4.1-flash`) | 10 | 2 | 8 | 16 / 20 | 1 |
+| `CoverageJudge` (free) | **10** | **2** | **8** | 20 / 20 | 0 |
+
+**The headline tally is identical — and that is a coincidence, not agreement.** Comparing
+pairs rather than totals:
+
+- the two judges agree on **14 of 20 pairs** — **30% disagreement**;
+- the disagreements run both ways and happen to cancel in the aggregate;
+- **all six disagreements involve a refusal**, so the two instruments differ *only* on how
+  to treat a declining answer.
+
+This is the trap the control was for. Anyone comparing methods on the win table alone would
+conclude the paid judge confirms the free heuristic. It does not: it disagrees on nearly a
+third of the individual comparisons, and the matching total hides that. **An aggregate can
+mask 30% disagreement.**
+
+### A hypothesis this refuted
+
+The obvious explanation was that the LLM judge's extra signal is refusal-awareness, which
+`strict_coverage` already provides for free. So the control was run a third way — a judge
+scoring pairs by refusal-aware strict coverage:
+
+| comparator | agreement with the LLM judge |
+|---|---:|
+| raw `deterministic_coverage` | 14 / 20 (70%) |
+| refusal-aware `strict_coverage` | **13 / 20 (65%)** |
+
+Making the lexical metric refusal-aware did **not** close the gap; it moved slightly further
+away. So the judge's disagreement with a lexical heuristic is **not** explained by refusals
+after all, and the earlier framing of this section's hypothesis was wrong.
+
+What the remaining disagreement *is* cannot be settled at n=20. In four of the six cases
+both lexical scores are equal (0.00 vs 0.00 — the metric has no signal at all) while the
+LLM judge still expressed a preference. That is either signal the metric lacks or the
+judge's own 20% positional noise, **and 20 samples cannot tell those apart.**
+
+### Verdict on the judge as configured
+
+**It does not earn its cost on this benchmark.** It reproduces a free heuristic's headline,
+disagrees with it on 30% of pairs without either being demonstrably right, carries 20%
+positional disagreement with itself, and left one pair unjudged across three runs.
+
+There is evidence it *can* add signal — `syn-000-q-08` is a pair where both arms declined,
+the judge correctly called a tie, and the lexical metric scored the router a win because its
+refusal echoed the requirement's terms. But a judge whose verdict changes with answer order
+one time in five cannot be used to establish that. **Fix the order agreement first; without
+it the sample size is irrelevant.**
+
+## 6. Findings
 
 Established:
 
@@ -190,10 +250,13 @@ Not established:
 - **Anything about a documented model.** See below.
 - The **cost axis**: the quality–token frontier is not computable from this run (see
   limitation 4).
+- **Whether the paid judge contributes anything a free heuristic does not.** Section 5
+  shows the two agree on totals and disagree on 30% of pairs, which is a stand-off, not a
+  result.
 
 ---
 
-## 6. Threats to validity
+## 7. Threats to validity
 
 1. **The model is a private proxy alias.** `deepseek-v4.1-flash` is served through a
    third-party Anthropic-compatible endpoint. Nobody else can reproduce these numbers, the
@@ -218,21 +281,21 @@ Not established:
 
 ---
 
-## 7. What to do next, in order
+## 8. What to do next, in order
 
-1. **Constrain the judge's output format** so it must emit its verdict in a text block
-   after analysis. This targets both remaining failures directly: the 20% position
-   disagreement and the no-verdict replies.
-2. **Run `CoverageJudge` over the same pairs** — zero calls. If the paid judge's verdicts
-   largely reproduce a lexical heuristic, it is not adding information and should be
-   replaced rather than trusted.
+1. ~~Run `CoverageJudge` over the same pairs~~ — **done, section 5.** Result: identical
+   totals, 30% pairwise disagreement, and it refuted the refusal hypothesis.
+2. **Fix the judge's order agreement before anything else.** It is 80%, and a verdict that
+   changes with answer order one time in five makes every downstream number unusable.
+   Constrain the output format so the verdict must appear in a text block after the
+   analysis, then re-measure the order agreement on the same 20 pairs.
 3. **Report refusal checkpoints separately** instead of mixing them into the win table,
-   since they are 5 of the 8 ties.
+   since they are 5 of the 8 ties and all 6 judge disagreements.
 4. **Only then scale the sample**, and only against a documented model.
 
 ---
 
-## 8. 中文摘要
+## 9. 中文摘要
 
 这是**答案质量实验的第一次运行**，目的是验证：证据召回到底是不是答案质量的合格代理。
 

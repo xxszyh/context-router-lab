@@ -272,3 +272,18 @@ def test_an_empty_reply_is_retried_rather_than_losing_the_pair() -> None:
     assert judge.compare(query="q", requirements=["r"], answer_a="A", answer_b="B") == "b"
     assert judge.parse_failures == 0
     assert judge.replies == ["", '{"winner": "b", "reason": "x"}']
+
+
+def test_the_coverage_judge_is_order_invariant_unlike_a_model() -> None:
+    """The control's value is that it has no positional noise, so any disagreement with a
+    model judge is the model's noise or the model's signal -- never the protocol's."""
+
+    pairs = [
+        pair("migration.py 的锁升级需要先收敛", "不太确定。"),
+        pair("不太确定。", "migration.py 的锁升级需要先收敛"),
+    ]
+
+    outcomes = run_pairwise_judging(CoverageJudge(), pairs, swap=True)
+
+    assert [o.agreement for o in outcomes] == [True, True]
+    assert [o.winner for o in outcomes] == ["a", "b"], "resolved onto arms, not positions"
