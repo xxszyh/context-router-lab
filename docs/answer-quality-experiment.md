@@ -175,8 +175,45 @@ what exercising more independent judgement looks like.
 
 **90% is still not good.** One verdict in ten still flips with the order the answers appear
 in, and the no-verdict rate rose because the procedure is more thinking than the budget
-allowed. Both are fixable — the second by raising the budget to match the thinking the
-instructions provoke — and neither is fixed yet.
+allowed.
+
+### Run 5: raising the budget reached 100%, and that is not the whole story
+
+The budget went to 4 096 with `JudgeCall` now recording `stop_reason` and output tokens.
+
+| | run 3 | run 4 | run 5 |
+|---|---:|---:|---:|
+| order agreement | 80% | 90% | **100% (20/20)** |
+| final parse failures | 1 | 2 | **0** |
+| wins `hybrid` / `cheap` / ties | 10 / 2 / 8 | 9 / 2 / 9 | 11 / 2 / 7 |
+| judge output tokens | 30 576 | 47 220 | 45 830 |
+| agreement with the free `CoverageJudge` | 70% | 65% | 65% |
+
+Three things stop this being a clean win.
+
+**The thinking expands to fill whatever budget it is given.** `stop_reason` shows 3 of 41
+calls still hit the 4 096 cap, and one reply still needed a retry. Raising the budget again
+is a treadmill rather than a fix: the model thinks until the cap, so the cap sets the
+thinking and not the other way round. The next change has to **bound the analysis**, not
+enlarge its allowance.
+
+**It cost about 50% more.** Output tokens went from 30 576 in run 3 to 45 830 in run 5 for
+the same twenty pairs. Perfect self-consistency was bought with more deliberation.
+
+**And on the one pair that can be adjudicated by hand, the extra deliberation produced a
+worse verdict.** Only two verdicts changed between runs 4 and 5, both from `tie` to `a`
+(`syn-000-q-03`, `syn-000-q-05`). In `syn-000-q-03` **both answers declined to answer** — and
+run 5 rewards the router for it, because its refusal echoed the requirement's terms. That is
+precisely the loophole instruction 2 was written to close, and run 4 had it right. The
+longer thinking talked the judge out of the correct verdict.
+
+> **100% self-consistent is not 100% correct.** The consistency metric the fix was aimed at
+> cannot see this, and reporting the 100% without it would be reporting the instrument's
+> agreement with itself as if it were agreement with the truth.
+
+Agreement with the free heuristic stayed at 65%, so run 5 did not simply converge on the
+lexical scorer — the judge has not become a slower copy of a free heuristic. What it has
+become is stable and, on the evidence available, no more right than run 4.
 
 ### Judge result (run 3, stable with run 2)
 
@@ -339,10 +376,17 @@ Not established:
    analysis, then re-measure the order agreement on the same 20 pairs.
 3. **Report refusal checkpoints separately** instead of mixing them into the win table,
    since they are 5 of the 8 ties and all 6 judge disagreements.
-4. **Raise the judge's budget to match the thinking its instructions provoke.** Thinking
-   is now 8 000–9 000 characters ≈ 2 000–2 500 tokens against a 2 048 cap, so replies are
-   being lost to a limit the procedure itself made too small.
-5. **Only then scale the sample**, and only against a documented model.
+4. **Bound the judge's analysis rather than enlarging its allowance.** Raising the budget
+   to 4 096 reached perfect order agreement but the thinking grew to meet it (3 calls still
+   hit the cap) and the extra deliberation reverted a verdict that run 4 had right. The
+   instruction should cap the analysis — a fixed number of bullets per requirement, then the
+   verdict — so the deliberation has a boundary the model sets rather than one the budget
+   imposes.
+5. **Re-check `syn-000-q-03` by hand after any further change.** It is the one pair that can
+   be adjudicated from the answer text alone, and it has now been wrong twice in opposite
+   directions. It is the cheapest available correctness probe, and the consistency metric
+   cannot substitute for it.
+6. **Only then scale the sample**, and only against a documented model.
 
 ---
 
