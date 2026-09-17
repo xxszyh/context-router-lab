@@ -112,7 +112,7 @@ the quality and cost question. That split is v0.3's main consequence.
 | Claude history importer | `importers/claude_code.py`, CLI `ingest-claude` |
 | reports | `docs/answer-quality-experiment.md`, `docs/v0.3-necessity-is-circular.md`, `docs/annotation-protocol.md` |
 
-166 tests, `ruff check`, `ruff format --check`, `mypy src tests` all clean.
+169 tests, `ruff check`, `ruff format --check`, `mypy src tests` all clean.
 
 ## Error log, for whoever continues
 

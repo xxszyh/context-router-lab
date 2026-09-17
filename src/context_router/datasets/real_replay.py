@@ -38,6 +38,7 @@ from context_router.domain import (
     RawEvent,
     Relation,
 )
+from context_router.evaluation.scoring import requirement_terms
 from context_router.storage import SQLiteEventStore
 
 SCHEMA_VERSION = "1.0"
@@ -123,8 +124,17 @@ class AnnotatedCheckpoint(Contract):
     as_of_sequence: int = Field(ge=0)
     query_type: QueryType
     relation_label: Relation
+    #: Which contexts are *necessary* -- a counterfactual, and circular to label. Superseded
+    #: by `answer_requirements`; see `docs/v0.3-necessity-is-circular.md` before filling it.
     required_context_ids: list[str] = Field(default_factory=list)
     acceptable_evidence_sets: list[list[str]] = Field(default_factory=list)
+    #: What a correct answer must contain, one to three short statements. Unlike
+    #: `required_context_ids` this is readable off the assistant's own reply, so it needs no
+    #: retrieval and no counterfactual, and it is what the real-replay answer-quality gate
+    #: scores against. Every entry must carry at least one matchable term -- a quoted span or
+    #: an ASCII identifier -- because `requirement_satisfied` returns False outright for a
+    #: requirement with none, however good the answer is. `validate_real_replay` enforces it.
+    answer_requirements: list[str] = Field(default_factory=list)
     must_abstain: bool = False
     difficulty: Literal["easy", "medium", "hard"] = "medium"
     language: Literal["zh", "en", "mixed"] = "mixed"
@@ -353,7 +363,7 @@ def to_benchmark_queries(
                     event.event_id for event in events if event.sequence > checkpoint.as_of_sequence
                 ][:3],
                 relation_label=checkpoint.relation_label,
-                answer_requirements=[],
+                answer_requirements=list(checkpoint.answer_requirements),
                 must_abstain=checkpoint.must_abstain,
                 difficulty=checkpoint.difficulty,
             )
@@ -460,6 +470,17 @@ def validate_real_replay(
                 errors.append(
                     f"must_abstain conflicts with required contexts: {checkpoint.sample_id}"
                 )
+            for requirement in checkpoint.answer_requirements:
+                # A requirement with no quoted span and no ASCII identifier can never be
+                # satisfied -- `requirement_satisfied` returns False for it outright. That is
+                # not a strict label, it is an unscoreable one, and it silently caps the
+                # checkpoint's coverage below 1.0 forever. Six real checkpoints carried one
+                # apiece ("必须实际生成...图", "必须交付...文件") before this check existed.
+                if not requirement_terms(requirement):
+                    errors.append(
+                        f"requirement has nothing to match on in {checkpoint.sample_id}: "
+                        f"{requirement}"
+                    )
             for option in checkpoint.acceptable_evidence_sets:
                 if not option:
                     errors.append(f"empty evidence option in {checkpoint.sample_id}")

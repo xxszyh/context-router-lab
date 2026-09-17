@@ -14,6 +14,7 @@ from context_router.datasets.real_replay import (
     assert_clean,
     export_sanitized,
     scrub,
+    to_benchmark_queries,
     validate_real_replay,
 )
 from context_router.domain import EventContextAssignment, FlatContext, RawEvent
@@ -88,6 +89,7 @@ def annotation(
     second: str | None = None,
     required: list[str] | None = None,
     evidence: list[list[str]] | None = None,
+    requirements: list[str] | None = None,
 ) -> RealReplayAnnotation:
     """Built with parameters rather than mutated: the contracts are frozen by design."""
 
@@ -104,6 +106,7 @@ def annotation(
                 relation_label="switch_or_return",
                 required_context_ids=["ctx-ice"] if required is None else required,
                 acceptable_evidence_sets=[["evt-2"]] if evidence is None else evidence,
+                answer_requirements=[] if requirements is None else requirements,
                 annotator="a1",
                 second_annotator=second,
             )
@@ -189,6 +192,52 @@ def test_validate_accepts_a_causally_sound_annotation(store: SQLiteEventStore) -
     report = validate_real_replay(store, [annotation()], enforce_double_annotation=False)
 
     assert report.valid is True, report.errors
+
+
+def test_validate_rejects_a_requirement_with_nothing_to_match_on(
+    store: SQLiteEventStore,
+) -> None:
+    """An unscoreable requirement is not a strict one -- it can never be satisfied at all.
+
+    `requirement_satisfied` returns False outright when a requirement carries no quoted span
+    and no ASCII identifier, so a checkpoint holding one is capped below 1.0 forever, and the
+    failure reads as a weak answer rather than as a broken label. Six real checkpoints carried
+    one apiece ("必须实际生成...图", "必须交付...文件") before this check existed.
+    """
+
+    report = validate_real_replay(
+        store,
+        [annotation(requirements=["必须实际重新生成并导出最终图"])],
+        enforce_double_annotation=False,
+    )
+
+    assert report.valid is False
+    assert any("nothing to match on" in error for error in report.errors)
+
+
+def test_validate_accepts_requirements_that_carry_a_quoted_span_or_identifier(
+    store: SQLiteEventStore,
+) -> None:
+    report = validate_real_replay(
+        store,
+        [annotation(requirements=["指出「15 格」对不上", "提到 p2_user_new.py 收敛慢"])],
+        enforce_double_annotation=False,
+    )
+
+    assert report.valid is True, report.errors
+
+
+def test_answer_requirements_survive_conversion_to_the_router_contract(
+    store: SQLiteEventStore,
+) -> None:
+    """They used to be dropped on the floor here, so labelling them changed nothing."""
+
+    labelled = annotation(requirements=["指出「15 格」对不上"])
+    events = store.list_events("real-1")
+
+    queries = to_benchmark_queries(labelled, events)
+
+    assert queries[0].answer_requirements == ["指出「15 格」对不上"]
 
 
 def test_double_annotation_floor_is_enforced(store: SQLiteEventStore) -> None:
