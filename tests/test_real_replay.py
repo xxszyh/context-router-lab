@@ -279,3 +279,40 @@ def test_the_guard_does_not_echo_what_it_caught() -> None:
 
     assert secret_value not in str(excinfo.value)
     assert "chars)" in str(excinfo.value), "report the shape, not the value"
+
+
+def test_a_same_annotator_recheck_does_not_count_as_double_annotation() -> None:
+    """The two measure different things and must not be conflated.
+
+    Independent annotators measure how much a label depends on *who* is labelling. One person
+    twice measures test-retest stability, which is weaker. Folding the recheck into the
+    double-annotation rate would report the weaker property as the stronger one, and the 20%
+    floor exists precisely to force the stronger one.
+    """
+
+    from context_router.datasets.real_replay import annotation_coverage
+
+    rechecked = annotation().model_copy(
+        update={
+            "checkpoints": [
+                annotation()
+                .checkpoints[0]
+                .model_copy(
+                    update={
+                        "recheck_annotator": "a1",
+                        "recheck_method": "same annotator, different route",
+                        "recheck_contexts_agree": True,
+                        "recheck_type_agrees": False,
+                    }
+                )
+            ]
+        }
+    )
+
+    coverage = annotation_coverage([rechecked])
+
+    assert coverage.rechecked == 1
+    assert coverage.recheck_context_agreement == 1.0
+    assert coverage.recheck_type_agreement == 0.0
+    assert coverage.double_annotated == 0, "a recheck is not an independent annotator"
+    assert coverage.double_rate == 0.0

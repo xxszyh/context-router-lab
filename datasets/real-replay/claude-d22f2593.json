@@ -2987,7 +2987,11 @@
       "difficulty": "hard",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "asks whether the fix addresses what codex raised: the code is in T1 and codex's list is in the imported log, so two contexts are required. The validator found this by reporting no causal evidence for the single-context label."
+      "notes": "asks whether the fix addresses what codex raised: the code is in T1 and codex's list is in the imported log, so two contexts are required. The validator found this by reporting no causal evidence for the single-context label.",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": false,
+      "recheck_type_agrees": false
     },
     {
       "sample_id": "real-d22f2593-q-0157",
@@ -3008,7 +3012,11 @@
       "difficulty": "medium",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "'我的答案' is a bare possessive referring to the open T1 comparison"
+      "notes": "'我的答案' is a bare possessive referring to the open T1 comparison",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": false,
+      "recheck_type_agrees": true
     },
     {
       "sample_id": "real-d22f2593-q-0193",
@@ -3029,7 +3037,11 @@
       "difficulty": "medium",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "user challenges a prior assistant claim of having run the code -- the required context is the earlier turn that made the claim, not the current topic"
+      "notes": "user challenges a prior assistant claim of having run the code -- the required context is the earlier turn that made the claim, not the current topic",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": true,
+      "recheck_type_agrees": true
     },
     {
       "sample_id": "real-d22f2593-q-0219",
@@ -3051,7 +3063,11 @@
       "difficulty": "hard",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "opens the figure task, but the figure is of the first problem's control volume, so the T1 context is required to know what to draw"
+      "notes": "opens the figure task, but the figure is of the first problem's control volume, so the T1 context is required to know what to draw",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": false,
+      "recheck_type_agrees": false
     },
     {
       "sample_id": "real-d22f2593-q-0331",
@@ -3072,7 +3088,11 @@
       "difficulty": "medium",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "'视觉上的调整' names no object; resolves only against the open Visio artefact"
+      "notes": "'视觉上的调整' names no object; resolves only against the open Visio artefact",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": false,
+      "recheck_type_agrees": false
     },
     {
       "sample_id": "real-d22f2593-q-0576",
@@ -3093,7 +3113,11 @@
       "difficulty": "medium",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "user rejects the bottom face; the required evidence is the prior bottom-face work"
+      "notes": "user rejects the bottom face; the required evidence is the prior bottom-face work",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": false,
+      "recheck_type_agrees": true
     },
     {
       "sample_id": "real-d22f2593-q-0801",
@@ -3115,7 +3139,11 @@
       "difficulty": "hard",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "asks which of codex's scripts is the reference solver: needs the import lineage and the T1 comparison together"
+      "notes": "asks which of codex's scripts is the reference solver: needs the import lineage and the T1 comparison together",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": false,
+      "recheck_type_agrees": false
     },
     {
       "sample_id": "real-d22f2593-q-0868",
@@ -3136,7 +3164,11 @@
       "difficulty": "medium",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "switches to reading the imported codex log"
+      "notes": "switches to reading the imported codex log",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": true,
+      "recheck_type_agrees": false
     },
     {
       "sample_id": "real-d22f2593-q-0977",
@@ -3157,7 +3189,11 @@
       "difficulty": "hard",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "returns to the CN accuracy question after time spent in the imported log"
+      "notes": "returns to the CN accuracy question after time spent in the imported log",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": false,
+      "recheck_type_agrees": false
     },
     {
       "sample_id": "real-d22f2593-q-1216",
@@ -3178,7 +3214,11 @@
       "difficulty": "medium",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "switches to the third problem's long-term environment"
+      "notes": "switches to the third problem's long-term environment",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": true,
+      "recheck_type_agrees": false
     },
     {
       "sample_id": "real-d22f2593-q-1269",
@@ -3199,7 +3239,11 @@
       "difficulty": "hard",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "returns to T1 while the previous context was the third problem"
+      "notes": "returns to T1 while the previous context was the third problem",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": false,
+      "recheck_type_agrees": true
     },
     {
       "sample_id": "real-d22f2593-q-1426",
@@ -3221,7 +3265,11 @@
       "difficulty": "hard",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "one turn that both imports codex history and opens the fourth problem"
+      "notes": "one turn that both imports codex history and opens the fourth problem",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": false,
+      "recheck_type_agrees": false
     },
     {
       "sample_id": "real-d22f2593-q-1760",
@@ -3242,7 +3290,11 @@
       "difficulty": "hard",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "returns to the third problem after the fourth"
+      "notes": "returns to the third problem after the fourth",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": true,
+      "recheck_type_agrees": true
     },
     {
       "sample_id": "real-d22f2593-q-1841",
@@ -3263,7 +3315,11 @@
       "difficulty": "medium",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "'跑吧' with no object at all; the referent is only in the previous turn"
+      "notes": "'跑吧' with no object at all; the referent is only in the previous turn",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": false,
+      "recheck_type_agrees": true
     },
     {
       "sample_id": "real-d22f2593-q-1892",
@@ -3284,7 +3340,11 @@
       "difficulty": "hard",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "re-reads the problem statement for the third problem while the fourth is open"
+      "notes": "re-reads the problem statement for the third problem while the fourth is open",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": true,
+      "recheck_type_agrees": true
     },
     {
       "sample_id": "real-d22f2593-q-1897",
@@ -3305,7 +3365,11 @@
       "difficulty": "hard",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "proposes a refined value that would supersede the rounding already agreed"
+      "notes": "proposes a refined value that would supersede the rounding already agreed",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": true,
+      "recheck_type_agrees": false
     },
     {
       "sample_id": "real-d22f2593-q-1910",
@@ -3327,7 +3391,11 @@
       "difficulty": "hard",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "asks whether r and dr change every step; the identifiers mean different things in the third and fourth problems"
+      "notes": "asks whether r and dr change every step; the identifiers mean different things in the third and fourth problems",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": false,
+      "recheck_type_agrees": false
     },
     {
       "sample_id": "real-d22f2593-q-1944",
@@ -3348,7 +3416,11 @@
       "difficulty": "hard",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "returns to the first problem's cross-validation methods"
+      "notes": "returns to the first problem's cross-validation methods",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": false,
+      "recheck_type_agrees": true
     },
     {
       "sample_id": "real-d22f2593-q-1998",
@@ -3369,7 +3441,11 @@
       "difficulty": "medium",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "hard switch from code to paper figures"
+      "notes": "hard switch from code to paper figures",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": true,
+      "recheck_type_agrees": true
     },
     {
       "sample_id": "real-d22f2593-q-2157",
@@ -3390,7 +3466,11 @@
       "difficulty": "medium",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "switches to standing up the grid-convergence argument"
+      "notes": "switches to standing up the grid-convergence argument",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": false,
+      "recheck_type_agrees": false
     },
     {
       "sample_id": "real-d22f2593-q-2450",
@@ -3412,7 +3492,11 @@
       "difficulty": "hard",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "the request mixes a third-problem quantity with a second-problem quantity in one sentence, so two contexts are genuinely required"
+      "notes": "the request mixes a third-problem quantity with a second-problem quantity in one sentence, so two contexts are genuinely required",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": false,
+      "recheck_type_agrees": false
     },
     {
       "sample_id": "real-d22f2593-q-1227",
@@ -3426,7 +3510,11 @@
       "difficulty": "medium",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "asks whether the whole problem could be done with a PINN: a topic with no prior context, so no context is required and routing must not invent one"
+      "notes": "asks whether the whole problem could be done with a PINN: a topic with no prior context, so no context is required and routing must not invent one",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": true,
+      "recheck_type_agrees": true
     },
     {
       "sample_id": "real-d22f2593-q-1370",
@@ -3440,7 +3528,11 @@
       "difficulty": "medium",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "asks whether COMSOL could help: again answerable only by leaving the existing contexts alone"
+      "notes": "asks whether COMSOL could help: again answerable only by leaving the existing contexts alone",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": false,
+      "recheck_type_agrees": true
     },
     {
       "sample_id": "real-d22f2593-q-2511",
@@ -3461,7 +3553,11 @@
       "difficulty": "medium",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "switches to the AI-usage declaration"
+      "notes": "switches to the AI-usage declaration",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": false,
+      "recheck_type_agrees": true
     },
     {
       "sample_id": "real-d22f2593-q-2572",
@@ -3483,7 +3579,11 @@
       "difficulty": "hard",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "asks for the paper to describe the solver history, which lives in the first problem"
+      "notes": "asks for the paper to describe the solver history, which lives in the first problem",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": false,
+      "recheck_type_agrees": false
     },
     {
       "sample_id": "real-d22f2593-q-3070",
@@ -3504,7 +3604,11 @@
       "difficulty": "hard",
       "language": "mixed",
       "annotator": "claude",
-      "notes": "returns to the support-material check to ask about personal information"
+      "notes": "returns to the support-material check to ask about personal information",
+      "recheck_annotator": "claude",
+      "recheck_method": "same annotator, different route: required contexts re-derived from which context the assistant's own reply drew on by entity overlap; query type re-derived from wording rules. Not independent annotation.",
+      "recheck_contexts_agree": true,
+      "recheck_type_agrees": false
     }
   ]
 }

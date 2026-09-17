@@ -130,10 +130,17 @@ class AnnotatedCheckpoint(Contract):
     language: Literal["zh", "en", "mixed"] = "mixed"
     annotator: str
     notes: str = ""
-    #: Set when a second annotator labelled this checkpoint independently.
+    #: Set only when a *different* person labelled this checkpoint independently. A second
+    #: pass by the same annotator is a recheck and goes in the fields below, because one
+    #: person twice cannot measure how much a label depends on who is labelling.
     second_annotator: str | None = None
     #: Set when the two disagreed and someone resolved it.
     adjudicated_by: str | None = None
+    #: A same-annotator re-derivation: what it used, and whether it landed on the same label.
+    recheck_annotator: str | None = None
+    recheck_method: str = ""
+    recheck_contexts_agree: bool | None = None
+    recheck_type_agrees: bool | None = None
 
 
 class RealReplayAnnotation(Contract):
@@ -335,25 +342,46 @@ def to_benchmark_queries(
 
 
 class AnnotationCoverage(Contract):
-    """How much of the labelling is independently checked."""
+    """Independent double annotation, and the weaker same-annotator recheck beside it.
+
+    These are kept apart deliberately. The plan's 20% floor is about independent annotators,
+    because the number it produces is how much the labels depend on *who* is labelling. A
+    recheck by the same annotator measures test-retest stability instead, which is a weaker
+    property, and folding it into `double_rate` would report the weaker thing as the stronger.
+    """
 
     checkpoints: int = Field(ge=0)
     double_annotated: int = Field(ge=0)
     adjudicated: int = Field(ge=0)
     double_rate: float = Field(ge=0.0, le=1.0)
+    rechecked: int = Field(ge=0)
+    recheck_context_agreement: float = Field(ge=0.0, le=1.0)
+    recheck_type_agreement: float = Field(ge=0.0, le=1.0)
 
 
 def annotation_coverage(annotations: list[RealReplayAnnotation]) -> AnnotationCoverage:
-    """Double-annotation coverage, which the plan requires to reach 20%."""
+    """Double-annotation coverage and the recheck rates, reported separately."""
 
     checkpoints = [item for annotation in annotations for item in annotation.checkpoints]
     double = sum(1 for item in checkpoints if item.second_annotator)
     adjudicated = sum(1 for item in checkpoints if item.adjudicated_by)
+    rechecked = [item for item in checkpoints if item.recheck_annotator]
     return AnnotationCoverage(
         checkpoints=len(checkpoints),
         double_annotated=double,
         adjudicated=adjudicated,
         double_rate=double / len(checkpoints) if checkpoints else 0.0,
+        rechecked=len(rechecked),
+        recheck_context_agreement=(
+            sum(1 for item in rechecked if item.recheck_contexts_agree) / len(rechecked)
+            if rechecked
+            else 0.0
+        ),
+        recheck_type_agreement=(
+            sum(1 for item in rechecked if item.recheck_type_agrees) / len(rechecked)
+            if rechecked
+            else 0.0
+        ),
     )
 
 
