@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from context_router.domain import Contract, Relation
+from context_router.domain import Contract, QueryType, Relation
 
 
 class RouteCaseResult(Contract):
@@ -21,7 +21,7 @@ class RouteCaseResult(Contract):
     confidence: float = Field(ge=0.0, le=1.0)
     relation_expected: Relation
     relation_predicted: Relation
-    query_type: str = "unknown"
+    query_type: QueryType
 
 
 def _safe_div(numerator: float, denominator: float) -> float:

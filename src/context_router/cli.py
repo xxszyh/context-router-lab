@@ -526,6 +526,8 @@ def benchmark_command(
                 "sample_id": sample.sample_id,
                 "session_id": sample.session_id,
                 "query_type": sample.query_type,
+                "relation_expected": sample.relation_label,
+                "relation_predicted": decision.relation,
                 "required_context_ids": sample.required_context_ids,
                 "decision": decision.model_dump(mode="json"),
             }
@@ -709,6 +711,31 @@ def report_command(
         def count(value: object) -> str:
             return str(value) if isinstance(value, int) else "n/a"
 
+        def append_stage_table(title: str, label: str, groups: object) -> None:
+            if not isinstance(groups, dict):
+                return
+            lines.extend(
+                [
+                    "",
+                    f"### {title}",
+                    "",
+                    f"| {label} | Cases | Candidate recall | Selection recall | "
+                    "Candidate misses | Selection losses | Excess contexts |",
+                    "|---|---:|---:|---:|---:|---:|---:|",
+                ]
+            )
+            for name, raw_row in sorted(groups.items()):
+                if not isinstance(raw_row, dict):
+                    continue
+                lines.append(
+                    f"| `{name}` | {count(raw_row.get('cases'))} "
+                    f"| {display(raw_row.get('candidate_micro_recall'))} "
+                    f"| {display(raw_row.get('selection_micro_recall'))} "
+                    f"| {count(raw_row.get('candidate_miss_count'))} "
+                    f"| {count(raw_row.get('selection_loss_count'))} "
+                    f"| {count(raw_row.get('selection_extra_count'))} |"
+                )
+
         lines += [
             "",
             "## Routing stage diagnosis",
@@ -724,25 +751,8 @@ def report_command(
             "was available and was later dropped by ranking, calibration or policy. Excess",
             "contexts point to over-selection or under-calibration.",
         ]
-        by_query_type = stages.get("by_query_type")
-        if isinstance(by_query_type, dict):
-            lines += [
-                "",
-                "| Query type | Cases | Candidate recall | Selection recall | "
-                "Candidate misses | Selection losses | Excess contexts |",
-                "|---|---:|---:|---:|---:|---:|---:|",
-            ]
-            for name, raw_row in sorted(by_query_type.items()):
-                if not isinstance(raw_row, dict):
-                    continue
-                lines.append(
-                    f"| `{name}` | {count(raw_row.get('cases'))} "
-                    f"| {display(raw_row.get('candidate_micro_recall'))} "
-                    f"| {display(raw_row.get('selection_micro_recall'))} "
-                    f"| {count(raw_row.get('candidate_miss_count'))} "
-                    f"| {count(raw_row.get('selection_loss_count'))} "
-                    f"| {count(raw_row.get('selection_extra_count'))} |"
-                )
+        append_stage_table("By query type", "Query type", stages.get("by_query_type"))
+        append_stage_table("By expected relation", "Expected relation", stages.get("by_relation"))
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
     typer.echo(str(output))

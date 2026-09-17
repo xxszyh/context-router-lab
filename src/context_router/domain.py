@@ -14,6 +14,15 @@ Actor = Literal["user", "assistant", "tool", "system"]
 EventKind = Literal["message", "tool_call", "tool_result", "file_change", "decision", "artifact"]
 Relation = Literal["continue", "switch_or_return", "cross_context", "new_context", "unknown"]
 Decision = Literal["route", "abstain", "new_context_candidate"]
+QueryType = Literal[
+    "continue",
+    "return",
+    "switch",
+    "cross_context",
+    "short_coreference",
+    "new_context",
+    "unanswerable",
+]
 
 
 class Contract(BaseModel):
@@ -212,15 +221,7 @@ class BenchmarkQuery(Contract):
     query_event_id: str
     as_of_sequence: int
     language: Literal["zh", "en", "mixed"]
-    query_type: Literal[
-        "continue",
-        "return",
-        "switch",
-        "cross_context",
-        "short_coreference",
-        "new_context",
-        "unanswerable",
-    ]
+    query_type: QueryType
     required_context_ids: list[str]
     acceptable_evidence_sets: list[list[str]]
     forbidden_future_event_ids: list[str]

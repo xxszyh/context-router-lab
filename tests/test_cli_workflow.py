@@ -50,6 +50,8 @@ def test_cli_generates_ingests_validates_and_benchmarks_dataset(tmp_path: Path) 
     assert "continue" in stages["by_query_type"]
     assert "cross_context" in stages["by_query_type"]
     assert results["traces"][0]["query_type"]
+    assert results["traces"][0]["relation_expected"]
+    assert results["traces"][0]["relation_predicted"]
 
     report = tmp_path / "report.md"
     reported = runner.invoke(app, ["report", str(output), str(report)])
@@ -60,6 +62,8 @@ def test_cli_generates_ingests_validates_and_benchmarks_dataset(tmp_path: Path) 
     assert "Selection losses" in report_text
     assert "Excess selected contexts" in report_text
     assert "| `continue` |" in report_text
+    assert "By expected relation" in report_text
+    assert "| `switch_or_return` |" in report_text
 
 
 def test_judge_answers_applies_the_double_refusal_gate_by_default(tmp_path: Path) -> None:
