@@ -550,11 +550,10 @@ def annotate_necessity_command(
             if not any(event.sequence < seq for event in context_events):
                 continue  # the context does not exist yet at this checkpoint
             usable = [event for event in context_events if event.sequence < seq]
-            overlap = BM25Index({e.event_id: e.content for e in usable}, analyzer=analyzer).rank(
-                query, per_context
-            )
-            if not overlap:
+            bm25 = BM25Index({e.event_id: e.content for e in usable}, analyzer=analyzer)
+            if not bm25.rank(query, per_context):
                 controls.add(context_id)
+            plausibility[context_id] = max(bm25.scores(query).values(), default=0.0)
             materials[context_id] = context_material(
                 usable, query, analyzer=analyzer, limit=per_context
             )
