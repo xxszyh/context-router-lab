@@ -215,6 +215,49 @@ Agreement with the free heuristic stayed at 65%, so run 5 did not simply converg
 lexical scorer — the judge has not become a slower copy of a free heuristic. What it has
 become is stable and, on the evidence available, no more right than run 4.
 
+### Run 6: bounding the analysis fixed the cost and broke the consistency
+
+The hypothesis from run 5 was that the extra deliberation had talked the judge out of the
+correct verdict, so the instruction was changed to bound the analysis — one short line per
+requirement, no restating, four lines total — while keeping the 4 096 budget.
+
+| | run 3 | run 4 | run 5 | run 6 |
+|---|---:|---:|---:|---:|
+| order agreement | 80% | 90% | **100%** | **85%** |
+| parse failures | 1 | 2 | 0 | 0 |
+| calls hitting the cap | — | — | 3 | **0** |
+| judge output tokens | 30 576 | 47 220 | 45 830 | **16 396** |
+| `syn-000-q-03` (correct = `tie`) | `a` ✗ | `tie` ✓ | `a` ✗ | `a` ✗ |
+
+**Two things it fixed, cleanly.** Output tokens fell **64%** and the cap hits went to zero:
+bounding the analysis does control the thinking, which the budget never did.
+
+**And one thing it broke.** Order agreement fell from 100% back to **85%**. The judge's
+self-consistency evidently depends on being allowed to deliberate, so there is a real
+tension between the cost and the consistency and neither setting is acceptable.
+
+**The hypothesis itself was wrong.** `syn-000-q-03` is still `a`. Bounding the deliberation
+did not restore the correct verdict, so run 5's long thinking was not the cause. Across four
+runs that pair has been `a`, `tie`, `a`, `a` — **v4 is the outlier and `a` is the base rate**.
+The judge gets this pair wrong by default.
+
+That is the important result, and it is not about deliberation at all: **instruction 2 does
+not work.** Telling the judge "repeating a requirement's wording while saying the answer
+cannot be given does NOT satisfy it" does not stop it happening. The refusal loophole is a
+*content* judgement that a prompt cannot reliably impose.
+
+### What this means for the next step
+
+Prompt engineering has reached its limit on this judge. The thing that demonstrably detects
+the loophole is already in the repository: `is_refusal` found the 20–25% false-positive rate
+in the lexical metric and it is what `strict_coverage` is built on. It should be applied as a
+**hard gate on the judge's verdict** rather than asked for in prose — if both answers decline,
+the pair is a tie whatever the judge concluded. That is the one mechanism here with a
+measured track record.
+
+A gate would also make the remaining prompt tuning safe to stop, since correctness would no
+longer depend on the instruction being obeyed.
+
 ### Judge result (run 3, stable with run 2)
 
 | | count |
@@ -376,17 +419,17 @@ Not established:
    analysis, then re-measure the order agreement on the same 20 pairs.
 3. **Report refusal checkpoints separately** instead of mixing them into the win table,
    since they are 5 of the 8 ties and all 6 judge disagreements.
-4. **Bound the judge's analysis rather than enlarging its allowance.** Raising the budget
-   to 4 096 reached perfect order agreement but the thinking grew to meet it (3 calls still
-   hit the cap) and the extra deliberation reverted a verdict that run 4 had right. The
-   instruction should cap the analysis — a fixed number of bullets per requirement, then the
-   verdict — so the deliberation has a boundary the model sets rather than one the budget
-   imposes.
-5. **Re-check `syn-000-q-03` by hand after any further change.** It is the one pair that can
-   be adjudicated from the answer text alone, and it has now been wrong twice in opposite
-   directions. It is the cheapest available correctness probe, and the consistency metric
-   cannot substitute for it.
-6. **Only then scale the sample**, and only against a documented model.
+4. ~~Bound the judge's analysis~~ — **done, run 6.** It fixed the cost (−64% output tokens,
+   zero cap hits) and broke the order agreement (100% → 85%). Left in place, because
+   truncation and cost are real defects and the consistency was not trustworthy at either
+   setting, but recorded as a trade rather than an improvement.
+5. **Gate the judge's verdict on the deterministic refusal check** instead of instructing for
+   it. Run 6 showed the instruction does not work, and `is_refusal` is already the one
+   mechanism here with a measured track record. This is the next change to make.
+6. **Keep using `syn-000-q-03` as the correctness probe.** It has now been wrong in three of
+   four runs and it is the only pair adjudicable from the answer text alone. Order agreement
+   cannot substitute for it: run 5 scored 100% on consistency while getting this pair wrong.
+7. **Only then scale the sample**, and only against a documented model.
 
 ---
 
