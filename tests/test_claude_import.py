@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from typing import Any
 
 from context_router.importers.claude_code import import_claude_code
 from context_router.storage import SQLiteEventStore
 
 
-def write_jsonl(path, records: list[dict]) -> None:
+def write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
     path.write_text(
         "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records),
         encoding="utf-8",
     )
 
 
-def test_claude_import_preserves_visible_turns_and_tool_lineage(tmp_path) -> None:
+def test_claude_import_preserves_visible_turns_and_tool_lineage(tmp_path: Path) -> None:
     source = tmp_path / "projects" / "C--repo"
     source.mkdir(parents=True)
     transcript = source / "session-1.jsonl"
@@ -93,7 +95,7 @@ def test_claude_import_preserves_visible_turns_and_tool_lineage(tmp_path) -> Non
     assert all(event.payload["source"] == "claude-code" for event in events)
 
 
-def test_including_subagents_keeps_their_sequences_in_separate_sessions(tmp_path) -> None:
+def test_including_subagents_keeps_their_sequences_in_separate_sessions(tmp_path: Path) -> None:
     project = tmp_path / "projects" / "C--repo"
     subagents = project / "parent-session" / "subagents"
     subagents.mkdir(parents=True)
