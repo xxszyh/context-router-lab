@@ -295,9 +295,9 @@ is a lexical heuristic. Results now include separate checkpoint strata (`answera
 `must_refuse`) and response strata (`neither`, `one`, or `both` refusing). Use
 `--no-refusal-gate` only for an ablation. Gated pairs are excluded from the judge's order-
 agreement denominator, and the primary `tally` contains answerable checkpoints only;
-`overall_tally` remains an explicitly named diagnostic. The original answer artefact and
-private credentials were not retained, so this implementation has offline regression coverage
-but no claimed seventh live judge run.
+must-refuse results are available only in their separate stratum. The original answer artefact
+and private credentials were not retained, so this implementation has offline regression
+coverage but no claimed seventh live judge run.
 
 **These numbers are illustrative and not reproducible.** The model used is a private proxy
 alias, not a documented identifier. Read

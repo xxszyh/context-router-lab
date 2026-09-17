@@ -241,6 +241,23 @@ def test_summary_counts_wins_and_reports_order_agreement() -> None:
     assert tally["full_history"]["order_agreement"] == 0.5
 
 
+def test_summary_reports_unmeasured_agreement_as_none() -> None:
+    outcome = JudgeOutcome(
+        sample_id="gated",
+        arm_a="hybrid_router",
+        arm_b="full_history",
+        winner="tie",
+        swapped=False,
+        agreement=None,
+        decision_source="refusal_gate",
+    )
+
+    tally = summarise_wins([outcome])
+
+    assert tally["hybrid_router"]["order_agreement"] is None
+    assert tally["full_history"]["order_agreement"] is None
+
+
 def test_judge_summary_separates_checkpoint_and_response_refusal_strata() -> None:
     pairs = [
         pair("无法回答。", "No information is available.").model_copy(
@@ -281,6 +298,7 @@ def test_judge_summary_separates_checkpoint_and_response_refusal_strata() -> Non
     assert summary["checkpoint"]["must_refuse"]["pairs"] == 1
     assert summary["checkpoint"]["answerable"]["pairs"] == 2
     assert summary["response"]["both_refuse"]["ties"] == 1
+    assert summary["response"]["both_refuse"]["judged_pairs"] == 1
     assert summary["response"]["one_refuses"]["arm_b_wins"] == 1
     assert summary["response"]["neither_refuses"]["disagreed"] == 1
 

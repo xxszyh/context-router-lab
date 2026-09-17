@@ -103,8 +103,10 @@ def test_judge_answers_applies_the_double_refusal_gate_by_default(tmp_path: Path
     assert payload["outcomes"][0]["winner"] == "tie"
     assert payload["outcomes"][0]["agreement"] is None
     assert payload["tally"] == {}, "the primary table excludes must-refuse checkpoints"
-    assert payload["overall_tally"], "the all-pair diagnostic remains available explicitly"
+    assert "overall_tally" not in payload, "refusal checkpoints must not re-enter a mixed table"
     assert payload["strata"]["checkpoint"]["must_refuse"]["pairs"] == 1
+    assert payload["strata"]["checkpoint"]["must_refuse"]["judged_pairs"] == 0
+    assert payload["strata"]["checkpoint"]["must_refuse"]["order_agreement"] is None
     assert payload["strata"]["response"]["both_refuse"]["pairs"] == 1
 
 

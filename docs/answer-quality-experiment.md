@@ -31,9 +31,11 @@ The result JSON also reports two independent strata: labelled checkpoint intent
 (`answerable` / `must_refuse`) and observed answer behaviour (`neither_refuses` /
 `one_refuses` / `both_refuse`). This completes the reporting change requested below without
 collapsing "the benchmark expected a refusal" into "the model happened to refuse". The
-primary `tally` now covers answerable checkpoints only; the mixed diagnostic is retained under
-the explicit name `overall_tally`. Both arms must carry the same boolean `must_abstain` label,
-or the CLI stops instead of silently classifying the checkpoint as answerable.
+primary `tally` now covers answerable checkpoints only; must-refuse outcomes remain in their
+own stratum instead of any mixed total. Both arms must carry the same boolean
+`must_abstain` label, or the CLI stops instead of silently classifying the checkpoint as
+answerable. A stratum with no actual judge calls reports `order_agreement: null` alongside
+`judged_pairs: 0`, distinguishing unmeasured agreement from zero agreement.
 
 This is an implementation result, not a new empirical row in the tables. The original
 `answers.json` and private-provider credentials were not retained in the current workspace,

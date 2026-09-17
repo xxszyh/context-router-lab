@@ -18,13 +18,14 @@ from __future__ import annotations
 import json
 import re
 from statistics import fmean
-from typing import Literal, Protocol, cast
+from typing import Literal, Protocol, cast, runtime_checkable
 
 from context_router.domain import Contract
 from context_router.evaluation.scoring import deterministic_coverage, is_refusal
 from context_router.providers.openai_compatible import AnswerResult
 
 Verdict = Literal["a", "b", "tie"]
+DecisionSource = Literal["judge", "refusal_gate"]
 
 JUDGE_INSTRUCTIONS = (
     "You compare two candidate answers to the same question about a software project. You are "
@@ -53,6 +54,18 @@ class Judge(Protocol):
     ) -> Verdict: ...
 
 
+class JudgePredecision(Contract):
+    verdict: Verdict
+    source: DecisionSource
+
+
+@runtime_checkable
+class PrejudgingJudge(Protocol):
+    def prejudge(
+        self, *, query: str, requirements: list[str], answer_a: str, answer_b: str
+    ) -> JudgePredecision | None: ...
+
+
 class RefusalGatedJudge:
     """Skip model judging when both candidates explicitly decline to answer.
 
@@ -71,9 +84,14 @@ class RefusalGatedJudge:
     def compare(
         self, *, query: str, requirements: list[str], answer_a: str, answer_b: str
     ) -> Verdict:
-        if self.should_gate(answer_a=answer_a, answer_b=answer_b):
-            self.record_gate()
-            return "tie"
+        predecision = self.prejudge(
+            query=query,
+            requirements=requirements,
+            answer_a=answer_a,
+            answer_b=answer_b,
+        )
+        if predecision is not None:
+            return predecision.verdict
         return self.delegate.compare(
             query=query,
             requirements=requirements,
@@ -81,11 +99,14 @@ class RefusalGatedJudge:
             answer_b=answer_b,
         )
 
-    def should_gate(self, *, answer_a: str, answer_b: str) -> bool:
-        return is_refusal(answer_a) and is_refusal(answer_b)
-
-    def record_gate(self) -> None:
+    def prejudge(
+        self, *, query: str, requirements: list[str], answer_a: str, answer_b: str
+    ) -> JudgePredecision | None:
+        del query, requirements
+        if not (is_refusal(answer_a) and is_refusal(answer_b)):
+            return None
         self.gate_hits += 1
+        return JudgePredecision(verdict="tie", source="refusal_gate")
 
 
 class JudgeCall(Contract):
@@ -121,7 +142,7 @@ class JudgeOutcome(Contract):
     swapped: bool
     #: None when only one order was judged; False means the two orders disagreed.
     agreement: bool | None
-    decision_source: Literal["judge", "refusal_gate"] = "judge"
+    decision_source: DecisionSource = "judge"
 
 
 def build_judge_prompt(*, query: str, requirements: list[str], answer_a: str, answer_b: str) -> str:
@@ -271,19 +292,26 @@ def run_pairwise_judging(
 
     outcomes: list[JudgeOutcome] = []
     for pair in pairs:
-        if isinstance(judge, RefusalGatedJudge) and judge.should_gate(
-            answer_a=pair.answer_a, answer_b=pair.answer_b
-        ):
-            judge.record_gate()
+        predecision = (
+            judge.prejudge(
+                query=pair.query,
+                requirements=pair.requirements,
+                answer_a=pair.answer_a,
+                answer_b=pair.answer_b,
+            )
+            if isinstance(judge, PrejudgingJudge)
+            else None
+        )
+        if predecision is not None:
             outcomes.append(
                 JudgeOutcome(
                     sample_id=pair.sample_id,
                     arm_a=pair.arm_a,
                     arm_b=pair.arm_b,
-                    winner="tie",
+                    winner=predecision.verdict,
                     swapped=False,
                     agreement=None,
-                    decision_source="refusal_gate",
+                    decision_source=predecision.source,
                 )
             )
             continue
@@ -327,7 +355,7 @@ def run_pairwise_judging(
     return outcomes
 
 
-def summarise_wins(outcomes: list[JudgeOutcome]) -> dict[str, dict[str, float]]:
+def summarise_wins(outcomes: list[JudgeOutcome]) -> dict[str, dict[str, float | None]]:
     """Win / loss / tie counts per arm, plus how often the two orders agreed."""
 
     tally: dict[str, dict[str, float]] = {}
@@ -345,21 +373,21 @@ def summarise_wins(outcomes: list[JudgeOutcome]) -> dict[str, dict[str, float]]:
             tally[winner]["wins"] += 1
             tally[loser]["losses"] += 1
     agreements = [float(o.agreement) for o in outcomes if o.agreement is not None]
-    order_agreement = fmean(agreements) if agreements else 0.0
+    order_agreement = fmean(agreements) if agreements else None
     for row in tally.values():
         row["win_rate"] = row["wins"] / row["comparisons"] if row["comparisons"] else 0.0
-        row["order_agreement"] = order_agreement
-    return tally
+    return {arm: {**row, "order_agreement": order_agreement} for arm, row in tally.items()}
 
 
-def _summarise_outcome_group(outcomes: list[JudgeOutcome]) -> dict[str, int | float]:
+def _summarise_outcome_group(outcomes: list[JudgeOutcome]) -> dict[str, int | float | None]:
     known_agreement = [outcome for outcome in outcomes if outcome.agreement is not None]
     agreed = sum(outcome.agreement is True for outcome in known_agreement)
     return {
         "pairs": len(outcomes),
+        "judged_pairs": len(known_agreement),
         "agreed": agreed,
         "disagreed": sum(outcome.agreement is False for outcome in known_agreement),
-        "order_agreement": agreed / len(known_agreement) if known_agreement else 0.0,
+        "order_agreement": agreed / len(known_agreement) if known_agreement else None,
         "arm_a_wins": sum(outcome.winner == "a" for outcome in outcomes),
         "arm_b_wins": sum(outcome.winner == "b" for outcome in outcomes),
         "ties": sum(outcome.winner == "tie" for outcome in outcomes),
@@ -368,7 +396,7 @@ def _summarise_outcome_group(outcomes: list[JudgeOutcome]) -> dict[str, int | fl
 
 def summarise_judge_strata(
     pairs: list[JudgePair], outcomes: list[JudgeOutcome]
-) -> dict[str, dict[str, dict[str, int | float]]]:
+) -> dict[str, dict[str, dict[str, int | float | None]]]:
     """Separate benchmark intent from the answers' observed refusal behaviour.
 
     ``must_abstain`` identifies checkpoints whose labelled behaviour is a refusal.  The

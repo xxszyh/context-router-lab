@@ -436,7 +436,6 @@ def judge_answers_command(
         f"judge={judge.model_version}"
     )
     outcomes = run_pairwise_judging(judge, pairs, swap=True)
-    overall_tally = summarise_wins(outcomes)
     answerable_outcomes = [
         outcome for pair, outcome in zip(pairs, outcomes, strict=True) if not pair.must_abstain
     ]
@@ -465,7 +464,6 @@ def judge_answers_command(
             "judge_output_tokens": getattr(base_judge, "output_tokens", 0),
             "tally": tally,
             "tally_scope": "answerable_checkpoints_only",
-            "overall_tally": overall_tally,
             "strata": strata,
             "judge_calls": [c.model_dump(mode="json") for c in getattr(base_judge, "calls", [])],
             "outcomes": [outcome.model_dump(mode="json") for outcome in outcomes],
