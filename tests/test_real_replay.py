@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -338,3 +339,43 @@ def test_validate_rejects_a_required_context_that_does_not_exist_yet(
 
     assert report.valid is False
     assert any("no visible material" in error for error in report.errors), report.errors
+
+
+def test_answer_after_skips_tool_traffic_and_reads_the_real_reply() -> None:
+    """The first assistant event after a query is usually a tool call, not an answer.
+
+    Measured on the first real batch: that mistake gave a median of 72 characters where the
+    actual answers are a median of 1 520, which invalidated every judgement about what a reply
+    said.
+    """
+
+    from context_router.datasets.real_replay import answer_after
+
+    def built(event_id: str, sequence: int, actor: str, kind: str, content: str) -> RawEvent:
+        return RawEvent.create(
+            event_id=event_id,
+            session_id="real-1",
+            sequence=sequence,
+            occurred_at=datetime(2026, 9, 1, min(sequence, 59), tzinfo=UTC),
+            ingested_at=datetime(2026, 9, 1, min(sequence, 59), tzinfo=UTC),
+            actor=actor,  # type: ignore[arg-type]
+            kind=kind,  # type: ignore[arg-type]
+            content=content,
+        )
+
+    events = [
+        built("q", 1, "user", "message", "这个问题怎么解？"),
+        built("call", 2, "assistant", "tool_call", 'Read {"file_path": "x.py"}'),
+        built("res", 3, "tool", "tool_result", "file contents"),
+        built("a1", 4, "assistant", "message", "先看代码本身："),
+        built("a2", 5, "assistant", "message", "对不上，35 格里 15 格四位小数有差异。"),
+        built("q2", 6, "user", "message", "那怎么办？"),
+        built("a3", 7, "assistant", "message", "这一段属于下一轮，不该被算进来。"),
+    ]
+
+    answer = answer_after(events, 1)
+
+    assert "Read {" not in answer, "tool calls are not prose"
+    assert "file contents" not in answer, "tool results are not the assistant's reply"
+    assert "35 格里 15 格" in answer
+    assert "下一轮" not in answer, "the reply stops at the next user turn"
