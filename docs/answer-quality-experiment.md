@@ -383,6 +383,15 @@ scoring pairs by refusal-aware strict coverage:
 | raw `deterministic_coverage` | 14 / 20 (70%) |
 | refusal-aware `strict_coverage` | **13 / 20 (65%)** |
 
+> **Both numbers predate a scorer fix and are no longer reproducible.** `requirement_satisfied`
+> used to compare raw text, so a quoted span broken by `**` or a backtick counted as a miss —
+> eight requirements out of 65 failed that way on the real label set, every one of them a
+> verbatim quote. Neither figure here can be re-derived without re-running the paid calls, and
+> on the label set the fix moved coverage by up to **0.67 per checkpoint**. The *direction* of
+> this section's finding (refusal-awareness does not close the gap) is unaffected — both
+> comparators were scored by the same broken function — but the two counts should be treated
+> as stale rather than quoted.
+
 Making the lexical metric refusal-aware did **not** close the gap; it moved slightly further
 away. So the judge's disagreement with a lexical heuristic is **not** explained by refusals
 after all, and the earlier framing of this section's hypothesis was wrong.

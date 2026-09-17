@@ -7,6 +7,7 @@ from context_router.evaluation.scoring import (
     deterministic_coverage,
     is_refusal,
     is_refusal_requirement,
+    normalize_for_matching,
     requirement_satisfied,
     requirement_terms,
 )
@@ -69,3 +70,57 @@ def test_an_answer_that_echoes_the_rubric_while_declining_is_detectable() -> Non
 def test_a_real_answer_is_not_mistaken_for_a_refusal() -> None:
     real = "migration.py 的锁升级需要先收敛事务范围，若仍不稳定就回退到上一个可用版本。"
     assert is_refusal(real) is False
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "内部运动规律对 τ₄ **完全无影响**。",
+        "内部运动规律对 τ₄ *完全无影响*。",
+    ],
+)
+def test_markdown_emphasis_inside_a_quoted_span_still_matches(answer: str) -> None:
+    """Every one of the eight misses on the first real label set was this.
+
+    A model that emits markdown would otherwise score below one that does not, on identical
+    content -- and this scorer's whole job is comparing arms.
+    """
+
+    requirement = "指出「内部运动规律对 τ₄ 完全无影响」"
+    assert requirement_satisfied(requirement, answer)
+
+
+def test_underscore_emphasis_is_deliberately_not_normalised() -> None:
+    """A known limitation, kept because the cure costs more than the disease.
+
+    ``__bold__`` is markdown, but ``_`` is also an identifier character in this benchmark's
+    own vocabulary -- ``required_context_ids``, ``answer_requirements``, ``__init__.py``.
+    Stripping every underscore would make those collide with each other, which is a worse
+    failure than missing a rarer emphasis style. ``**`` and backticks are not identifier
+    characters, so they are stripped.
+    """
+
+    assert not requirement_satisfied(
+        "指出「内部运动规律对 τ₄ 完全无影响」", "内部运动规律对 τ₄ __完全无影响__。"
+    )
+
+
+def test_backticks_and_escaped_asterisks_do_not_break_a_quoted_span() -> None:
+    assert requirement_satisfied("给出「R* = 1.2112 cm」", "令其 = 760 → **R\\* = 1.2112 cm**")
+    assert requirement_satisfied("找到「最初的 T1.py」", "最后一轮审核针对的是最初的 `T1.py`")
+
+
+def test_spacing_inside_a_quoted_term_does_not_break_it() -> None:
+    assert requirement_satisfied("给出「λJ₁(λ)=Bi·J₀(λ)」", "特征方程 **λJ₁(λ) = Bi·J₀(λ)**")
+
+
+def test_normalisation_does_not_make_unrelated_answers_match() -> None:
+    """The loosening must stay inside the quoted span, not turn every pair into a match."""
+
+    requirement = "指出「内部运动规律对 τ₄ 完全无影响」"
+    assert not requirement_satisfied(requirement, "内部运动规律**有**影响。")
+    assert not requirement_satisfied(requirement, "内部运动规律对 τ₃ 完全无影响。")
+
+
+def test_identifier_characters_survive_normalisation() -> None:
+    assert normalize_for_matching("T2_CN.py") == "t2_cn.py"

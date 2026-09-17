@@ -80,10 +80,15 @@ results.
 
 ## Next step, in order
 
-1. **Write `answer_requirements` for the 26 real checkpoints.** Read `answer_after`'s output and
-   state what a correct answer must contain. No counterfactual, no retrieval. Already checked on
-   five: requirements are writable by reading and the existing scorer discriminates 1.00 against
-   the checkpoint's own answer and 0.00 against another's. *Offline.*
+1. ~~Write `answer_requirements` for the 26 real checkpoints~~ — **done, and they discriminate.**
+   65 requirements over 24 checkpoints (two have none: their reference turn was interrupted
+   before any prose existed, so correct behaviour there is `must_abstain`, not a requirement
+   string). Each checkpoint's requirements score **1.000 against their own answer**, and
+   against all 552 other-answer pairs the mean is **0.0088** with 541 pairs at exactly 0.00,
+   **no pair at 1.00**, and **60 of 65 requirements satisfied by no other answer at all**.
+   *Grade: exact, and offline — this is a property of the label set, not a model result.*
+   The eight requirements that first failed to match their own answer were **all** a quoted
+   span broken by markdown; see the error log.
 2. ~~Re-open the lexical question on the corrected reply text~~ — **done, and it works**:
    micro recall 0.880 / F1 0.786 for "which contexts does the answer draw on", scoring against
    member events rather than descriptors. The context-level label for real replay exists, is
@@ -102,11 +107,12 @@ the quality and cost question. That split is v0.3's main consequence.
 | answer experiment | `evaluation/answers.py`, CLI `answer-experiment` |
 | blinded judge | `evaluation/judge.py`, CLI `judge-answers [--judge coverage]` |
 | necessity by ablation | `evaluation/necessity.py`, CLI `annotate-necessity` — **its result was negative; read v0.3 before reusing** |
+| shallow answer scorer | `evaluation/scoring.py` — `deterministic_coverage`; markdown-normalised, **never report it as answer quality on its own** |
 | real-replay format + PII gate | `datasets/real_replay.py`; labels in `datasets/real-replay/`; scrubbed export gitignored |
 | Claude history importer | `importers/claude_code.py`, CLI `ingest-claude` |
 | reports | `docs/answer-quality-experiment.md`, `docs/v0.3-necessity-is-circular.md`, `docs/annotation-protocol.md` |
 
-159 tests, `ruff check`, `ruff format --check`, `mypy src tests` all clean.
+166 tests, `ruff check`, `ruff format --check`, `mypy src tests` all clean.
 
 ## Error log, for whoever continues
 
@@ -125,3 +131,14 @@ Recorded because each recurred after being understood once, and each costs calls
 4. **Scripted edits that report success without matching.** Several applied nothing while
    printing success, leaving a half-edited file. Two of the three ablation crashes trace to it.
    Verify by reading the diff, not the script's output.
+5. **The metric measuring formatting.** `requirement_satisfied` compared raw text, so a quoted
+   span with `**`, a backtick or an escaped `\*` inside it counted as a miss. On the real label
+   set that silently deflated **8 of 65 requirements**, every one a verbatim quote from the very
+   answer it was supposed to match — `「内部运动规律对 τ₄ 完全无影响」` against
+   `… τ₄ **完全无影响**`. It never surfaced as an error, only as a plausible-looking low score.
+   This is the dangerous version of defect 2: not reading the wrong input, but reading the right
+   input through a filter that only fails on one arm's formatting. `normalize_for_matching` now
+   strips `*`, `` ` `` and `\` and all whitespace from **both** sides; underscores are kept
+   deliberately, because they are identifier characters here and not emphasis. The check that
+   caught it generalises: **make each label score 1.00 against its own answer before trusting
+   any score against another's.**

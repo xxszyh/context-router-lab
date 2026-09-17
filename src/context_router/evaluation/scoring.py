@@ -15,6 +15,12 @@ import re
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_.\-]*")
 _QUOTED = re.compile(r"「([^」]+)」")
 
+#: Characters markdown emphasis uses, plus the backslash that escapes them.
+_EMPHASIS = re.compile(r"[*`\\]")
+
+#: Any run of whitespace.
+_WHITESPACE = re.compile(r"\s+")
+
 #: Requirement prefix marking a checkpoint whose correct behaviour is a refusal.
 REFUSAL_PREFIX = "说明上下文不足"
 
@@ -80,6 +86,28 @@ def requirement_terms(requirement: str) -> list[str]:
     return [*_IDENTIFIER.findall(requirement), *_QUOTED.findall(requirement)]
 
 
+def normalize_for_matching(text: str) -> str:
+    """Casefold, drop markdown emphasis, drop whitespace -- applied to both sides.
+
+    Without this the comparison measures formatting as much as content. On the first real
+    label set, eight requirements quoted verbatim from the reference answer failed to match
+    it, and every one was an emphasis marker landing inside the quoted span:
+
+        requirement  「内部运动规律对 τ₄ 完全无影响」
+        answer       "内部运动规律对 τ₄ **完全无影响**"
+
+    That is not a label error, and it is not a property of the answer either -- a model that
+    emits markdown scores below one that does not, on identical content. Since this scorer
+    exists to compare arms, that bias has to go.
+
+    Whitespace is removed rather than collapsed so ``λJ₁(λ)=Bi·J₀(λ)`` matches an answer that
+    spaced the equals sign. Underscores are kept: they are identifier characters here, not
+    emphasis, and ``T2_CN.py`` is a term this benchmark relies on.
+    """
+
+    return _WHITESPACE.sub("", _EMPHASIS.sub("", text)).lower()
+
+
 def requirement_satisfied(requirement: str, answer: str) -> bool:
     if is_refusal_requirement(requirement):
         lowered = answer.lower()
@@ -87,8 +115,8 @@ def requirement_satisfied(requirement: str, answer: str) -> bool:
     terms = requirement_terms(requirement)
     if not terms:
         return False
-    lowered = answer.lower()
-    return all(term.lower() in lowered for term in terms)
+    haystack = normalize_for_matching(answer)
+    return all(normalize_for_matching(term) in haystack for term in terms)
 
 
 def deterministic_coverage(requirements: list[str], answer: str) -> float:
