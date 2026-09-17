@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from context_router.datasets.real_replay import (
     AnnotatedCheckpoint,
@@ -87,7 +88,6 @@ def context() -> FlatContext:
 def annotation(
     *,
     second: str | None = None,
-    required: list[str] | None = None,
     evidence: list[list[str]] | None = None,
     requirements: list[str] | None = None,
 ) -> RealReplayAnnotation:
@@ -104,7 +104,6 @@ def annotation(
                 as_of_sequence=3,
                 query_type="return",
                 relation_label="switch_or_return",
-                required_context_ids=["ctx-ice"] if required is None else required,
                 acceptable_evidence_sets=[["evt-2"]] if evidence is None else evidence,
                 answer_requirements=[] if requirements is None else requirements,
                 annotator="a1",
@@ -179,13 +178,33 @@ def test_validate_rejects_a_non_causal_evidence_label(store: SQLiteEventStore) -
     assert any("non-causal evidence" in error for error in report.errors)
 
 
-def test_validate_rejects_an_undeclared_required_context(store: SQLiteEventStore) -> None:
-    report = validate_real_replay(
-        store, [annotation(required=["ctx-nope"])], enforce_double_annotation=False
-    )
+def test_a_real_annotation_carries_no_required_context_label() -> None:
+    """The field is absent by design, not by omission.
 
-    assert report.valid is False
-    assert any("undeclared contexts" in error for error in report.errors)
+    "Without this context the query cannot be answered" is a counterfactual, and labelling it
+    needs one to already know which context holds the answer -- the capability the benchmark
+    exists to measure. A field nobody can label is worse than no field, because it invites a
+    gate; the routing gates are answered on synthetic data instead. This test fails loudly if
+    the field is reintroduced without the argument for it.
+    """
+
+    assert "required_context_ids" not in AnnotatedCheckpoint.model_fields
+    assert "required_context_ids" not in RealReplayAnnotation.model_fields
+
+
+def test_an_annotation_still_carrying_the_dropped_field_is_rejected() -> None:
+    """Schema 2.0 is deliberately not backward compatible.
+
+    A file that still carries the field is carrying a label nobody can produce. Ignoring it
+    silently would leave the reader believing a routing gate had been measured; `extra` is
+    `forbid` on every contract, so it fails at load instead.
+    """
+
+    payload = annotation().model_dump()
+    payload["checkpoints"][0]["required_context_ids"] = ["ctx-ice"]
+
+    with pytest.raises(ValidationError):
+        RealReplayAnnotation.model_validate(payload)
 
 
 def test_validate_accepts_a_causally_sound_annotation(store: SQLiteEventStore) -> None:
@@ -368,26 +387,12 @@ def test_a_same_annotator_recheck_does_not_count_as_double_annotation() -> None:
     assert coverage.double_rate == 0.0
 
 
-def test_validate_rejects_a_required_context_that_does_not_exist_yet(
-    store: SQLiteEventStore,
-) -> None:
-    """Declared is not the same as visible.
-
-    The first real checkpoint required `ctx-t1-algo` while that context's own first event was
-    the checkpoint itself, so none of its material was in scope. The declaration check passed
-    it; only the ablation exposed it.
-    """
-
-    early = annotation(required=["ctx-ice"]).model_copy(
-        update={
-            "checkpoints": [annotation().checkpoints[0].model_copy(update={"as_of_sequence": 0})]
-        }
-    )
-
-    report = validate_real_replay(store, [early], enforce_double_annotation=False)
-
-    assert report.valid is False
-    assert any("no visible material" in error for error in report.errors), report.errors
+# `test_validate_rejects_a_required_context_that_does_not_exist_yet` was deleted with schema
+# 2.0, not moved. It built a checkpoint whose context had no material strictly before it --
+# two real checkpoints did exactly that, and the rejection is what made the circularity
+# visible. With `required_context_ids` gone there is no such claim to validate, so the test
+# has no subject left; the finding it recorded lives in `docs/v0.3-necessity-is-circular.md`
+# and in the comment where the check used to be.
 
 
 def test_answer_after_skips_tool_traffic_and_reads_the_real_reply() -> None:

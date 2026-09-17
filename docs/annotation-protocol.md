@@ -43,6 +43,13 @@ Apply in order. The first rule that matches decides the label.
 | 6 | one context, `active_before` it, but not `previous_active` | `return` | that context |
 | 7 | one context, never active before | `switch` | that context |
 
+> **The right-hand column no longer exists in the schema.** Real-replay schema 2.0 dropped
+> `required_context_ids`, for the reason this page ends on. It is kept in the table because the
+> procedure is a correct *specification* of a label that turned out to be unlabelable --
+> deleting the column would hide what was being attempted. What replaced it is
+> `answer_requirements`: readable off the assistant's own reply, so it needs no retrieval and
+> no counterfactual. See `v0.3-necessity-is-circular.md`.
+
 **Task noun** means any of: a file name, `题`/`问`, `图`/`表`, `附录`, `代码`, `模型`, `算法`,
 `文件`, `材料`, `网格`. Rule 4 exists because a query made only of a demonstrative carries no
 task information at all — it can only be resolved from the immediately preceding turns, which
@@ -90,8 +97,11 @@ deleted, so the next attempt does not repeat the three signals above.
 
 Consequences, recorded because they change what the next step is:
 
-1. **The first-pass labels stand.** They were assigned by reading, and reading is a legitimate
-   way to judge a counterfactual -- it is the *reproducibility* that is missing, not the method.
+1. ~~**The first-pass labels stand.**~~ **They were removed instead.** Reading is a legitimate
+   way to judge a counterfactual -- it is the *reproducibility* that is missing, not the method
+   -- but a label only one person can reproduce, and that person cannot re-derive it, is not a
+   label the project can gate on. Schema 2.0 dropped the field rather than keep values nobody
+   could defend, and `answer_requirements` took its place.
 2. **The over-used `cross_context` is not thereby confirmed or refuted.** The re-derivation
    that first raised the suspicion was measuring mention, not necessity, so it was never
    evidence about the label. The suspicion remains open, with no measurement.

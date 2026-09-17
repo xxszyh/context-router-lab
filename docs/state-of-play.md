@@ -63,12 +63,16 @@ the operator can change what it resolves to. Marked as such in the README and in
 
 ## Blockers
 
-**The required-context label is circular.** `required_context_ids` means "without this context
-the query cannot be answered" — a counterfactual. To label it one must already know which
-context contains the answer, which is the capability the benchmark exists to measure. Five
-attempts failed; two ran on correct inputs and one of those isolated the reason.
-→ `docs/v0.3-necessity-is-circular.md`. The synthetic benchmark is not circular because the
-generator constructs the evidence.
+**The required-context label is circular — resolved by removing the field, not by labelling
+it.** `required_context_ids` means "without this context the query cannot be answered" — a
+counterfactual. To label it one must already know which context contains the answer, which is
+the capability the benchmark exists to measure. Five attempts failed; two ran on correct
+inputs and one of those isolated the reason. **Schema 2.0 drops the field from the real-replay
+annotation entirely**, which is what v0.3 recommended: a field nobody can label is worse than
+no field, because it invites a gate. `answer_requirements` replaces it. The synthetic
+benchmark is unaffected and not circular — the generator constructs the evidence, so its labels
+are exact by construction and the routing gates are answered there.
+→ `docs/v0.3-necessity-is-circular.md`.
 
 **No independent second annotator.** The plan's 20% double-annotation floor is the only thing
 blocking scale-up, and it is at 0%. A same-annotator recheck was run and is recorded in its own

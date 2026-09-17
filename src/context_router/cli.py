@@ -497,11 +497,18 @@ def annotate_necessity_command(
     limit: Annotated[int, typer.Option(min=1, help="Checkpoints to process")] = 26,
     per_context: Annotated[int, typer.Option(min=1, help="Events per context")] = 6,
 ) -> None:
-    """Derive `required_context_ids` by ablation, and compare with the human labels.
+    """Derive a required-context set by ablation, for the record.
 
-    One call per (checkpoint, active context). The difference against the hand labels is the
-    disagreement proxy the recheck could not produce: it asks a counterfactual judge instead
-    of measuring text overlap, which three attempts showed cannot answer this question.
+    One call per (checkpoint, active context). This is the instrument that produced the
+    negative result in `docs/v0.3-necessity-is-circular.md`, kept so the result can be re-run
+    rather than taken on trust.
+
+    It no longer compares against human labels, because there are none to compare with: the
+    annotation has no `required_context_ids`, since that field cannot be labelled -- which is
+    the finding. `derived_required` is therefore an output with no ground truth attached, and
+    v0.3 is the thing to read before reading anything into it. The control failures are still
+    worth watching: they are the ablation calling a context necessary when removing it cost
+    nothing, which is the failure mode that was observed.
     """
 
     api_key = os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
@@ -581,14 +588,11 @@ def annotate_necessity_command(
         totals["unreadable"] += run.unreadable
         unreadable_replies.extend(run.unreadable_replies)
         totals["control_failures"] += len(failed_controls)
-        agrees = derived == sorted(checkpoint.required_context_ids)
         rows.append(
             {
                 "sample_id": checkpoint.sample_id,
                 "query_type": checkpoint.query_type,
-                "human_required": sorted(checkpoint.required_context_ids),
                 "derived_required": derived,
-                "agrees": agrees,
                 "control_failures": failed_controls,
                 "candidate_contexts": sorted(materials),
                 "unreadable": run.unreadable,
@@ -596,12 +600,10 @@ def annotate_necessity_command(
         )
         typer.echo(
             f"  [{index}/{min(limit, len(annotation.checkpoints))}] {checkpoint.sample_id} "
-            f"cand={len(materials)} human={len(checkpoint.required_context_ids)} "
-            f"derived={len(derived)} {'agree' if agrees else 'DIFFER'}"
+            f"cand={len(materials)} derived={len(derived)}"
             + (f" control-failures={failed_controls}" if failed_controls else "")
         )
 
-    agreed = sum(1 for row in rows if row["agrees"])
     _write_json(
         output,
         {
@@ -612,15 +614,13 @@ def annotate_necessity_command(
             "unreadable": totals["unreadable"],
             "unreadable_replies": unreadable_replies[:20],
             "control_failures": totals["control_failures"],
-            "exact_set_agreement": agreed / len(rows) if rows else 0.0,
             "seconds": round(time.time() - started, 1),
             "rows": rows,
         },
     )
     typer.echo(
-        f"\n{resolved_model}: {totals['calls']} calls, exact-set agreement "
-        f"{agreed}/{len(rows)}, unreadable {totals['unreadable']}, "
-        f"control failures {totals['control_failures']}"
+        f"\n{resolved_model}: {totals['calls']} calls, unreadable {totals['unreadable']}, "
+        f"control failures {totals['control_failures']} -- no agreement rate, see v0.3"
     )
     typer.echo(str(output))
 

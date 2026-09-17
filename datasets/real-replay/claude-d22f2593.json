@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "2.0",
   "source_session_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98",
   "source_note": "real Claude Code session, imported locally; raw store never committed",
   "contexts": [
@@ -2977,10 +2977,6 @@
       "as_of_sequence": 107,
       "query_type": "cross_context",
       "relation_label": "cross_context",
-      "required_context_ids": [
-        "ctx-t1-algo",
-        "ctx-meta"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:b9f2b335-3bae-4291-9b53-a49bb024b18e:0:tool_result",
@@ -3008,9 +3004,6 @@
       "as_of_sequence": 157,
       "query_type": "short_coreference",
       "relation_label": "continue",
-      "required_context_ids": [
-        "ctx-t1-algo"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:c1fb06d5-2371-423a-b417-161278e15bbb:0:tool_result",
@@ -3038,9 +3031,6 @@
       "as_of_sequence": 193,
       "query_type": "continue",
       "relation_label": "continue",
-      "required_context_ids": [
-        "ctx-t1-algo"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:daf5f842-8e98-4709-9d94-55a6e97bb74d:0:tool_result",
@@ -3064,10 +3054,6 @@
       "as_of_sequence": 219,
       "query_type": "cross_context",
       "relation_label": "cross_context",
-      "required_context_ids": [
-        "ctx-visio",
-        "ctx-t1-algo"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:15cb2f23-103b-43e4-9443-54fb289d6ff7:0:message",
@@ -3094,9 +3080,6 @@
       "as_of_sequence": 331,
       "query_type": "short_coreference",
       "relation_label": "continue",
-      "required_context_ids": [
-        "ctx-visio"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:b8272a27-0908-4ec9-afb1-363a3804f344:0:tool_result",
@@ -3124,9 +3107,6 @@
       "as_of_sequence": 576,
       "query_type": "continue",
       "relation_label": "continue",
-      "required_context_ids": [
-        "ctx-visio"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:e6f7b0d2-6d04-451a-a09d-264bb7f54047:0:tool_result",
@@ -3154,10 +3134,6 @@
       "as_of_sequence": 801,
       "query_type": "cross_context",
       "relation_label": "cross_context",
-      "required_context_ids": [
-        "ctx-meta",
-        "ctx-t1-algo"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:657c6bff-1a5c-46ae-8bff-be7620ede937:0:tool_result",
@@ -3185,9 +3161,6 @@
       "as_of_sequence": 868,
       "query_type": "switch",
       "relation_label": "switch_or_return",
-      "required_context_ids": [
-        "ctx-meta"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:750b7063-25d1-48b1-9136-4f0aea4ab7ae:0:tool_result",
@@ -3215,9 +3188,6 @@
       "as_of_sequence": 977,
       "query_type": "return",
       "relation_label": "switch_or_return",
-      "required_context_ids": [
-        "ctx-t1-algo"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:ba5dc1ce-8164-4e4a-a143-5814a58be86d:0:tool_result",
@@ -3245,9 +3215,6 @@
       "as_of_sequence": 1216,
       "query_type": "switch",
       "relation_label": "switch_or_return",
-      "required_context_ids": [
-        "ctx-q3-env"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:7eea9cae-614c-40a5-ad44-bbdf072f5290:0:tool_result",
@@ -3275,9 +3242,6 @@
       "as_of_sequence": 1269,
       "query_type": "return",
       "relation_label": "switch_or_return",
-      "required_context_ids": [
-        "ctx-t1-algo"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:d3449db1-97f0-4c04-9323-8efefcf35cb9:0:tool_result",
@@ -3305,10 +3269,6 @@
       "as_of_sequence": 1426,
       "query_type": "cross_context",
       "relation_label": "cross_context",
-      "required_context_ids": [
-        "ctx-q4-shrink",
-        "ctx-meta"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:3bb68caa-b1e1-4884-9a5e-6f767768d177:0:tool_result",
@@ -3334,9 +3294,6 @@
       "as_of_sequence": 1760,
       "query_type": "return",
       "relation_label": "switch_or_return",
-      "required_context_ids": [
-        "ctx-q3-env"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:cc5ffb6b-092f-4bb3-8b45-bb044c3a9faa:0:tool_result",
@@ -3363,9 +3320,6 @@
       "as_of_sequence": 1841,
       "query_type": "short_coreference",
       "relation_label": "continue",
-      "required_context_ids": [
-        "ctx-q4-shrink"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:426038a5-a4a9-4838-b1b4-e425d079fc7b:0:tool_result",
@@ -3393,9 +3347,6 @@
       "as_of_sequence": 1892,
       "query_type": "return",
       "relation_label": "switch_or_return",
-      "required_context_ids": [
-        "ctx-q3-env"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:58e6df34-24a1-4c12-b56c-98b1d07ef303:0:message",
@@ -3423,9 +3374,6 @@
       "as_of_sequence": 1897,
       "query_type": "return",
       "relation_label": "switch_or_return",
-      "required_context_ids": [
-        "ctx-q3-env"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:58e6df34-24a1-4c12-b56c-98b1d07ef303:0:message",
@@ -3453,10 +3401,6 @@
       "as_of_sequence": 1910,
       "query_type": "cross_context",
       "relation_label": "cross_context",
-      "required_context_ids": [
-        "ctx-q4-shrink",
-        "ctx-q3-env"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:f050bd4f-c7ef-4728-b73e-73253cdb46b9:0:tool_result",
@@ -3484,9 +3428,6 @@
       "as_of_sequence": 1944,
       "query_type": "return",
       "relation_label": "switch_or_return",
-      "required_context_ids": [
-        "ctx-t1-algo"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:b460222d-1397-4fb0-847f-b414e66fffa0:0:tool_result",
@@ -3513,9 +3454,6 @@
       "as_of_sequence": 1998,
       "query_type": "switch",
       "relation_label": "switch_or_return",
-      "required_context_ids": [
-        "ctx-visual"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:c0fed3d9-a89e-44c1-bb53-92528b0c017e:0:message",
@@ -3542,9 +3480,6 @@
       "as_of_sequence": 2157,
       "query_type": "switch",
       "relation_label": "switch_or_return",
-      "required_context_ids": [
-        "ctx-q2-grid"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:16c5d707-fd0e-495b-b734-d8b3342aad19:0:tool_result",
@@ -3568,10 +3503,6 @@
       "as_of_sequence": 2450,
       "query_type": "cross_context",
       "relation_label": "cross_context",
-      "required_context_ids": [
-        "ctx-q2-grid",
-        "ctx-q3-env"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:e725a78b-104f-44f9-9e18-3299827e53cc:0:message",
@@ -3599,7 +3530,6 @@
       "as_of_sequence": 1227,
       "query_type": "new_context",
       "relation_label": "new_context",
-      "required_context_ids": [],
       "acceptable_evidence_sets": [],
       "must_abstain": true,
       "difficulty": "medium",
@@ -3622,7 +3552,6 @@
       "as_of_sequence": 1370,
       "query_type": "new_context",
       "relation_label": "new_context",
-      "required_context_ids": [],
       "acceptable_evidence_sets": [],
       "must_abstain": true,
       "difficulty": "medium",
@@ -3645,9 +3574,6 @@
       "as_of_sequence": 2511,
       "query_type": "switch",
       "relation_label": "switch_or_return",
-      "required_context_ids": [
-        "ctx-paper"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:205db3b9-241c-4c9d-994b-1312fc032653:0:tool_result",
@@ -3675,10 +3601,6 @@
       "as_of_sequence": 2572,
       "query_type": "cross_context",
       "relation_label": "cross_context",
-      "required_context_ids": [
-        "ctx-paper",
-        "ctx-t1-algo"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:df7949aa-cf32-4750-afc3-9fc0d7536765:0:tool_result",
@@ -3706,9 +3628,6 @@
       "as_of_sequence": 3070,
       "query_type": "return",
       "relation_label": "switch_or_return",
-      "required_context_ids": [
-        "ctx-paper"
-      ],
       "acceptable_evidence_sets": [
         [
           "claude:d22f2593-21d1-4c36-8156-737656f86e98:404df885-f080-4028-b409-8c46d6a5d1b0:0:tool_result",

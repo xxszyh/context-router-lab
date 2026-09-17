@@ -41,7 +41,10 @@ from context_router.domain import (
 from context_router.evaluation.scoring import requirement_terms
 from context_router.storage import SQLiteEventStore
 
-SCHEMA_VERSION = "1.0"
+#: 2.0 drops `required_context_ids` from the checkpoint. It is a breaking change to the
+#: annotation format and deliberately not a compatible one: a file that still carries the field
+#: is carrying a label nobody can produce, and should fail loudly rather than be ignored.
+SCHEMA_VERSION = "2.0"
 
 #: Redactions applied to every exported string. The goal is to remove what identifies the
 #: person or the machine without removing what identifies the task, because file and symbol
@@ -124,13 +127,17 @@ class AnnotatedCheckpoint(Contract):
     as_of_sequence: int = Field(ge=0)
     query_type: QueryType
     relation_label: Relation
-    #: Which contexts are *necessary* -- a counterfactual, and circular to label. Superseded
-    #: by `answer_requirements`; see `docs/v0.3-necessity-is-circular.md` before filling it.
-    required_context_ids: list[str] = Field(default_factory=list)
+    #: There is deliberately no `required_context_ids` here. "Without this context the query
+    #: cannot be answered" is a counterfactual, and labelling it needs one to already know
+    #: which context holds the answer -- the capability the benchmark exists to measure. Five
+    #: attempts failed; see `docs/v0.3-necessity-is-circular.md`. A field nobody can label is
+    #: worse than no field, because it invites a gate, so the real-replay schema has none and
+    #: the routing gates are answered on the synthetic data where the generator knows the
+    #: evidence ids. `BenchmarkQuery` keeps its own copy of the field for that synthetic path.
     acceptable_evidence_sets: list[list[str]] = Field(default_factory=list)
-    #: What a correct answer must contain, one to three short statements. Unlike
-    #: `required_context_ids` this is readable off the assistant's own reply, so it needs no
-    #: retrieval and no counterfactual, and it is what the real-replay answer-quality gate
+    #: What a correct answer must contain, one to three short statements. This is the label
+    #: that replaces the one above: it is readable off the assistant's own reply, so it needs
+    #: no retrieval and no counterfactual, and it is what the real-replay answer-quality gate
     #: scores against. Every entry must carry at least one matchable term -- a quoted span or
     #: an ASCII identifier -- because `requirement_satisfied` returns False outright for a
     #: requirement with none, however good the answer is. `validate_real_replay` enforces it.
@@ -355,7 +362,10 @@ def to_benchmark_queries(
                 as_of_sequence=checkpoint.as_of_sequence,
                 language=checkpoint.language,
                 query_type=checkpoint.query_type,
-                required_context_ids=list(checkpoint.required_context_ids),
+                # Empty by design, not by omission: the annotation has no such label because it
+                # cannot have one (see `AnnotatedCheckpoint`). Anything computing a routing
+                # metric on a real-replay query gets zeros here, and should not.
+                required_context_ids=[],
                 acceptable_evidence_sets=[
                     list(option) for option in checkpoint.acceptable_evidence_sets
                 ],
@@ -442,34 +452,11 @@ def validate_real_replay(
                 continue
             if event.sequence != checkpoint.as_of_sequence:
                 errors.append(f"as_of_sequence mismatch: {checkpoint.sample_id}")
-            missing = set(checkpoint.required_context_ids) - known_contexts
-            if missing:
-                errors.append(f"undeclared contexts in {checkpoint.sample_id}: {sorted(missing)}")
-            # A context can be declared and still not exist yet at this checkpoint. The first
-            # real checkpoint required `ctx-t1-algo` while its own first event *was* that
-            # checkpoint, so nothing of it was visible -- a label referring to the future that
-            # the declaration check alone let through.
-            for context_id in checkpoint.required_context_ids:
-                members = [
-                    by_id[event_id].sequence
-                    for event_id in annotation.context_members.get(context_id, [])
-                    if event_id in by_id
-                ]
-                # Strictly before: a context whose only event at this point *is* the checkpoint
-                # has nothing to retrieve, so requiring it asks for material that cannot exist.
-                # Testing "no member is later" instead passes that case, which is how the first
-                # real checkpoint slipped through.
-                if members and not any(
-                    sequence < checkpoint.as_of_sequence for sequence in members
-                ):
-                    errors.append(
-                        f"required context has no visible material at "
-                        f"{checkpoint.sample_id}: {context_id}"
-                    )
-            if bool(checkpoint.required_context_ids) == checkpoint.must_abstain:
-                errors.append(
-                    f"must_abstain conflicts with required contexts: {checkpoint.sample_id}"
-                )
+            # Three checks used to live here, all reading `required_context_ids`: that its
+            # contexts were declared, that they had material visible strictly before the
+            # checkpoint, and that it was absent exactly when `must_abstain` was set. The field
+            # is gone -- it cannot be labelled -- so they are gone with it. The synthetic path
+            # keeps the equivalents in `datasets/validation.py`, where the label is exact.
             for requirement in checkpoint.answer_requirements:
                 # A requirement with no quoted span and no ASCII identifier can never be
                 # satisfied -- `requirement_satisfied` returns False for it outright. That is
