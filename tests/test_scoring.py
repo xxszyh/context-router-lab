@@ -17,6 +17,32 @@ def test_terms_are_the_identifier_and_the_quoted_topic() -> None:
     assert requirement_terms("覆盖 migration.py 的「锁升级」结论") == ["migration.py", "锁升级"]
 
 
+def test_one_character_identifiers_are_not_terms() -> None:
+    """A single letter matches almost any answer, so it is a liability rather than a check.
+
+    Real examples: `A` in 「方案 A」, `C` in 「ρ(C)」, `J` in 「λJ₁(λ)=Bi·J₀(λ)」, `r` in
+    「白色内孔椭圆（r）」. None of them carries content -- the quoted span does -- and each
+    becomes the *only* thing matching once the reading is loosened.
+    """
+
+    assert requirement_terms("给出「方案 A」与「方案 B」两种处理方式") == ["方案 A", "方案 B"]
+    assert requirement_terms("回答题目条件「不多余」：「ρ(C)」是热物性") == ["不多余", "ρ(C)"]
+    # An identifier inside a quoted span is extracted twice, which is harmless: requiring it
+    # twice is requiring it once. Only the one-character ones are dropped.
+    assert requirement_terms("指出只有「输出时」才需要换算，域外「填 NaN」") == [
+        "NaN",
+        "输出时",
+        "填 NaN",
+    ]
+
+
+def test_a_lone_single_character_leaves_nothing_to_match_on() -> None:
+    """Which is the correct verdict: `必须改 A` cannot be checked against an answer."""
+
+    assert requirement_terms("必须改 A") == []
+    assert not requirement_satisfied("必须改 A", "A 已经改了")
+
+
 def test_requirement_is_satisfied_only_when_both_terms_appear() -> None:
     requirement = "覆盖 migration.py 的「锁升级」结论"
 

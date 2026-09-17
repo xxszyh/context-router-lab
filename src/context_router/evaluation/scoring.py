@@ -81,9 +81,22 @@ def is_refusal(answer: str) -> bool:
 
 
 def requirement_terms(requirement: str) -> list[str]:
-    """The checkable terms of a requirement: ASCII identifiers plus quoted sub-topics."""
+    """The checkable terms of a requirement: ASCII identifiers plus quoted sub-topics.
 
-    return [*_IDENTIFIER.findall(requirement), *_QUOTED.findall(requirement)]
+    One-character identifiers are dropped. ``A`` in 「方案 A」, ``C`` in 「ρ(C)」, ``J`` in
+    「λJ₁(λ)=Bi·J₀(λ)」, ``r`` in 「白色内孔椭圆（r）」 -- each matches almost any answer, so
+    it contributes no signal when every term must match, and becomes the *only* signal when
+    the reading is loosened. Quoted spans are never filtered: a one-character span would be a
+    deliberate choice, and the content of these requirements lives in the span anyway.
+
+    Measured on the 26-checkpoint real label set: dropping them left **0** requirements
+    without a term, held the diagonal at 1.000, and cut the off-diagonal mean from 0.112 to
+    0.044 at half-match and 0.325 to 0.146 at any-match -- which is the reading a second
+    annotator's differently-worded labels would effectively amount to.
+    """
+
+    identifiers = [found for found in _IDENTIFIER.findall(requirement) if len(found) > 1]
+    return [*identifiers, *_QUOTED.findall(requirement)]
 
 
 def normalize_for_matching(text: str) -> str:

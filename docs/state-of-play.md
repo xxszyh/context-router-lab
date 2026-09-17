@@ -89,6 +89,17 @@ results.
    *Grade: exact, and offline — this is a property of the label set, not a model result.*
    The eight requirements that first failed to match their own answer were **all** a quoted
    span broken by markdown; see the error log.
+
+   **How much wording matters, bounded without a second annotator.** A differently-worded
+   requirement is usually one with a different number of checkable terms, so the proxy is to
+   vary how strictly the labels are read and watch the off-diagonal. The diagonal holds at
+   **1.000 under every rule**, and the off-diagonal degrades slowly: **0.0094** when every
+   term must match, **0.044** at half, **0.146** at any (three leaked checkpoints, thirteen at
+   the loosest). *Grade: measured, with a stated substitution — strictness stands in for
+   wording, which is an approximation.* Two limits come with it: **43%** of requirements are
+   anchored on prose rather than on a number, so they are the ones a re-wording could move;
+   and the labels do not extend to the two interrupted checkpoints, so the usable set is
+   **24 of 26**.
 2. ~~Re-open the lexical question on the corrected reply text~~ — **done, and it works**:
    micro recall 0.880 / F1 0.786 for "which contexts does the answer draw on", scoring against
    member events rather than descriptors. The context-level label for real replay exists, is
@@ -112,7 +123,7 @@ the quality and cost question. That split is v0.3's main consequence.
 | Claude history importer | `importers/claude_code.py`, CLI `ingest-claude` |
 | reports | `docs/answer-quality-experiment.md`, `docs/v0.3-necessity-is-circular.md`, `docs/annotation-protocol.md` |
 
-169 tests, `ruff check`, `ruff format --check`, `mypy src tests` all clean.
+171 tests, `ruff check`, `ruff format --check`, `mypy src tests` all clean.
 
 ## Error log, for whoever continues
 
