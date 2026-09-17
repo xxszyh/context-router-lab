@@ -34,9 +34,17 @@ from context_router.evaluation import (
     quality_token_frontier,
     run_arm,
     run_pairwise_judging,
+    summarise_judge_strata,
     summarise_wins,
 )
-from context_router.evaluation.judge import CoverageJudge, Judge, JudgePair, LLMJudge
+from context_router.evaluation.judge import (
+    CoverageJudge,
+    Judge,
+    JudgePair,
+    LLMJudge,
+    RefusalGatedJudge,
+)
+from context_router.importers import import_claude_code
 from context_router.providers import HashEmbeddingProvider
 from context_router.providers.anthropic import (
     AnthropicCompatibleAnswerProvider,
@@ -102,6 +110,27 @@ def ingest(
 ) -> None:
     counts = SQLiteEventStore(database).import_jsonl(jsonl)
     typer.echo(json.dumps(counts, ensure_ascii=False, sort_keys=True))
+
+
+@app.command("ingest-claude")
+def ingest_claude(
+    database: Annotated[Path, typer.Argument(help="Local append-only SQLite database")],
+    source: Annotated[
+        Path,
+        typer.Argument(help="Claude home, projects directory, or one project directory"),
+    ],
+    include_subagents: Annotated[bool, typer.Option()] = False,
+    dry_run: Annotated[bool, typer.Option()] = False,
+) -> None:
+    """Import visible Claude Code turns and tool lineage; omit hidden thinking."""
+
+    report = import_claude_code(
+        source,
+        SQLiteEventStore(database),
+        include_subagents=include_subagents,
+        dry_run=dry_run,
+    )
+    typer.echo(json.dumps(asdict(report), ensure_ascii=False, indent=2))
 
 
 @app.command("validate-dataset")
@@ -330,6 +359,13 @@ def judge_answers_command(
     auth_style: Annotated[str, typer.Option(help="bearer or x-api-key")] = "bearer",
     max_tokens: Annotated[int, typer.Option(min=64)] = 4096,
     judge_kind: Annotated[str, typer.Option("--judge", help="llm or coverage")] = "llm",
+    refusal_gate: Annotated[
+        bool,
+        typer.Option(
+            "--refusal-gate/--no-refusal-gate",
+            help="Tie two explicit refusals before calling the judge",
+        ),
+    ] = True,
 ) -> None:
     """Blind-judge two arms' answers pairwise, in both orders, and tally the wins.
 
@@ -354,6 +390,7 @@ def judge_answers_command(
                     arm_b=arm_b,
                     answer_a=left["answer"],
                     answer_b=right["answer"],
+                    must_abstain=bool(left.get("must_abstain", False)),
                 )
             )
         if len(pairs) >= limit:
@@ -363,9 +400,9 @@ def judge_answers_command(
     # The deterministic coverage judge is the control: it runs the identical swap
     # protocol with no model and no credential, so "is the paid judge adding anything"
     # is answerable for free.
-    judge: Judge
+    base_judge: Judge
     if judge_kind == "coverage":
-        judge = CoverageJudge()
+        base_judge = CoverageJudge()
     else:
         api_key = os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
         resolved_base = base_url or os.environ.get("ANTHROPIC_BASE_URL", "")
@@ -374,7 +411,7 @@ def judge_answers_command(
             raise typer.BadParameter(
                 "need ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL and a model (or --judge coverage)"
             )
-        judge = LLMJudge(
+        base_judge = LLMJudge(
             AnthropicCompatibleVerdictModel(
                 base_url=resolved_base,
                 api_key=api_key,
@@ -383,11 +420,14 @@ def judge_answers_command(
                 max_tokens=max_tokens,
             )
         )
+    judge: Judge = RefusalGatedJudge(base_judge) if refusal_gate else base_judge
     typer.echo(
-        f"{len(pairs)} pairs x 2 orders = {len(pairs) * 2} judge calls; judge={judge.model_version}"
+        f"{len(pairs)} pairs x 2 orders <= {len(pairs) * 2} judge calls; "
+        f"judge={judge.model_version}"
     )
     outcomes = run_pairwise_judging(judge, pairs, swap=True)
     tally = summarise_wins(outcomes)
+    strata = summarise_judge_strata(pairs, outcomes)
     for outcome in outcomes:
         typer.echo(
             f"  {outcome.sample_id:<16} winner={outcome.winner:<5} agreement={outcome.agreement}"
@@ -402,16 +442,20 @@ def judge_answers_command(
             "pairs": len(pairs),
             "agreed": sum(1 for outcome in outcomes if outcome.agreement),
             "ties": sum(1 for outcome in outcomes if outcome.winner == "tie"),
-            "parse_failures": getattr(judge, "parse_failures", 0),
-            "judge_input_tokens": getattr(judge, "input_tokens", 0),
-            "judge_output_tokens": getattr(judge, "output_tokens", 0),
+            "refusal_gate": refusal_gate,
+            "refusal_gate_hits": getattr(judge, "gate_hits", 0),
+            "refusal_gated_pairs": getattr(judge, "gate_hits", 0) // 2,
+            "parse_failures": getattr(base_judge, "parse_failures", 0),
+            "judge_input_tokens": getattr(base_judge, "input_tokens", 0),
+            "judge_output_tokens": getattr(base_judge, "output_tokens", 0),
             "tally": tally,
-            "judge_calls": [c.model_dump(mode="json") for c in getattr(judge, "calls", [])],
+            "strata": strata,
+            "judge_calls": [c.model_dump(mode="json") for c in getattr(base_judge, "calls", [])],
             "outcomes": [outcome.model_dump(mode="json") for outcome in outcomes],
         },
     )
     typer.echo(str(output))
-    failures = getattr(judge, "parse_failures", 0)
+    failures = getattr(base_judge, "parse_failures", 0)
     if failures:
         typer.echo(f"WARNING: {failures} unparseable judge replies")
 

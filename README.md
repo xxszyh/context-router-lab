@@ -96,6 +96,18 @@ ctxlab train-ranker run/bench.json run/ranker.json
 ctxlab tune-policy  run/bench.json run/policy.json
 ```
 
+Claude Code transcripts can be imported into a separate local event store without
+committing the source conversations:
+
+```powershell
+ctxlab ingest-claude run/claude-history.sqlite "$env:USERPROFILE\.claude"
+```
+
+The importer streams visible user/assistant messages, tool calls and tool results; preserves
+tool lineage and source metadata; replaces binary images with metadata-only placeholders;
+and deliberately omits hidden thinking blocks. Event IDs are stable, so repeating the command
+only imports newly appended records. Generated SQLite databases are ignored by Git.
+
 ## Baseline arms
 
 `compare-baselines` scores every memory strategy on the same token counter, the same
@@ -247,15 +259,15 @@ section rather than reported as one number.** A benchmark bug and a system bug l
 identical from the score alone, so the diagnostic loop classifies every failure by the
 layer that dropped the evidence instead of reporting a single score.
 
-## Answer quality: first run
+## Answer quality: exploratory run
 
 Everything above measures **evidence recall**, which is a proxy for answer quality and not
 a substitute for it. `ctxlab answer-experiment` and `ctxlab judge-answers` now measure the
 real thing: a main model answers each arm's memory, and a blinded judge compares the
 answers pairwise in both orders.
 
-The first run (60 answer calls, 40 judge calls) established the **direction** and nothing
-more:
+The answer run (60 answer calls) and six judge iterations established the **direction** and
+nothing more:
 
 - **Evidence recall is a valid proxy here.** The arm with 0.55 recall scores far worse on
   both instruments, and the mechanism is refusal — it declines 60% of the time rather than
@@ -271,10 +283,19 @@ with the paid judge on only **14 of 20 pairs**. The matching total is a coincide
 symmetric disagreement, not agreement — comparing methods on the win table alone would have
 concluded the paid judge confirms the free heuristic.
 
-The judge also agrees with itself across answer order only **80%** of the time, about 20% of
-its calls produced no readable verdict across three runs, and 5 of the 8 ties are checkpoints
-where a refusal was the correct answer. **As configured it does not earn its cost**, and the
-order agreement has to be fixed before any sample size means anything.
+The six judge iterations exposed a limit rather than a stable quality estimate. Anchoring the
+rubric raised order agreement from 80% to 100%, but the judge still got the one manually
+adjudicable pair wrong; bounding its analysis cut output tokens 64% and eliminated cap hits,
+but agreement fell to 85%. Prompting the judge not to reward an echoed refusal did not work.
+
+The structural fix is now implemented: `ctxlab judge-answers` wraps either judge in a narrow
+refusal gate, so if **both** answers explicitly decline it records a tie without making either
+position-swapped model call. A single refusal still goes to the delegate because `is_refusal`
+is a lexical heuristic. Results now include separate checkpoint strata (`answerable` versus
+`must_refuse`) and response strata (`neither`, `one`, or `both` refusing). Use
+`--no-refusal-gate` only for an ablation. The original answer artefact and private credentials
+were not retained, so this implementation has offline regression coverage but no claimed
+seventh live judge run.
 
 **These numbers are illustrative and not reproducible.** The model used is a private proxy
 alias, not a documented identifier. Read
@@ -298,8 +319,12 @@ any Codex/MCP integration.
 
 ## Honest limitations
 
-1. **Answer quality is unmeasured.** Every number here is routing or token accounting.
-   The claim "quality does not drop" is untested until a pinned model runs.
+1. **The magnitude of answer quality is still unmeasured.** A small private-model run
+   corroborates the direction of the evidence-recall result, but its six judge iterations
+   never produced a simultaneously correct, stable and reproducible instrument. The model
+   alias was private, n was 20 and the saved answer artefact was not retained. The claim
+   "quality does not drop" therefore still needs a fresh run against a documented pinned
+   model; the current result is evidence, not a final estimate.
 2. **The default embedder is not semantic.** `HashEmbeddingProvider` is a deterministic
    offline placeholder that hashes tokens into a 256-dimension vector. It makes
    `global_dense` and `global_hybrid` *reproducible smoke baselines*, not real dense
@@ -343,7 +368,7 @@ Statistics: paired bootstrap over conversations for confidence intervals.
 ## Development
 
 ```bash
-.venv/Scripts/python -m pytest         # 36 tests
+.venv/Scripts/python -m pytest
 .venv/Scripts/python -m ruff check .   # lint
 .venv/Scripts/python -m ruff format .
 .venv/Scripts/python -m mypy src       # strict

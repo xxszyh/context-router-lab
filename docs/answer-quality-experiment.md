@@ -15,6 +15,26 @@ another. Those failures are the most transferable part: each one is a case of me
 something other than what was claimed, and the last of them is a case of a single metric
 being watched while the thing that mattered went unchecked.
 
+### Implementation follow-up (2026-09-17; not a seventh live run)
+
+The structural change identified by run 6 is now implemented. `RefusalGatedJudge` wraps the
+delegate and returns `tie` before any model call when `is_refusal` detects that **both**
+answers decline. It deliberately does not decide a one-sided refusal: the detector is lexical
+and its known false positives must not be allowed to choose a winner. Under the normal swapped
+protocol, one gated pair therefore avoids two paid calls. `ctxlab judge-answers` enables this
+by default, records gate hits, and supports `--no-refusal-gate` for the ablation.
+
+The result JSON also reports two independent strata: labelled checkpoint intent
+(`answerable` / `must_refuse`) and observed answer behaviour (`neither_refuses` /
+`one_refuses` / `both_refuse`). This completes the reporting change requested below without
+collapsing "the benchmark expected a refusal" into "the model happened to refuse".
+
+This is an implementation result, not a new empirical row in the tables. The original
+`answers.json` and private-provider credentials were not retained in the current workspace,
+so claiming a seventh judge run would be irreproducible. Offline tests pin the gate, the
+two-order call avoidance, the single-refusal delegation and the CLI strata output; a new live
+run remains contingent on a documented pinned model and a saved answer artefact.
+
 ---
 
 ## 1. What was run
@@ -438,15 +458,17 @@ Not established:
    anchoring the verdict in the requirements and defining a tie. Run 6 then traded it back to
    85% for a 64% cost reduction. **The lesson is not the number but the method: run 5 scored
    100% while getting `syn-000-q-03` wrong, because only the consistency metric was watched.**
-3. **Report refusal checkpoints separately** instead of mixing them into the win table,
-   since they are 5 of the 8 ties and all 6 judge disagreements.
+3. ~~Report refusal checkpoints separately~~ — **implemented after run 6.** The result now
+   separates labelled checkpoint intent and observed response refusal behaviour, since they
+   answer different questions.
 4. ~~Bound the judge's analysis~~ — **done, run 6.** It fixed the cost (−64% output tokens,
    zero cap hits) and broke the order agreement (100% → 85%). Left in place, because
    truncation and cost are real defects and the consistency was not trustworthy at either
    setting, but recorded as a trade rather than an improvement.
-5. **Gate the judge's verdict on the deterministic refusal check** instead of instructing for
-   it. Run 6 showed the instruction does not work, and `is_refusal` is already the one
-   mechanism here with a measured track record. This is the next change to make.
+5. ~~Gate the judge's verdict on the deterministic refusal check~~ — **implemented after run
+   6, live re-run pending.** If both answers decline, the pair is tied before the delegate is
+   called; one-sided refusals remain judge decisions. The old answer artefact was not retained,
+   so the report does not invent a seventh-run number.
 6. **Keep using `syn-000-q-03` as the correctness probe.** It has now been wrong in three of
    four runs and it is the only pair adjudicable from the answer text alone. Order agreement
    cannot substitute for it: run 5 scored 100% on consistency while getting this pair wrong.

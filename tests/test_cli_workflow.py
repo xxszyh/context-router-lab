@@ -50,3 +50,54 @@ def test_cli_generates_ingests_validates_and_benchmarks_dataset(tmp_path: Path) 
     reported = runner.invoke(app, ["report", str(output), str(report)])
     assert reported.exit_code == 0, reported.output
     assert "Context Router Benchmark" in report.read_text(encoding="utf-8")
+
+
+def test_judge_answers_applies_the_double_refusal_gate_by_default(tmp_path: Path) -> None:
+    answers = tmp_path / "answers.json"
+    answers.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "sample_id": "s-01",
+                        "arm": "hybrid_router",
+                        "query": "What happened?",
+                        "answer_requirements": ["Explain the implementation"],
+                        "answer": "上下文不足，无法回答。",
+                        "must_abstain": True,
+                    },
+                    {
+                        "sample_id": "s-01",
+                        "arm": "query_recent_only",
+                        "query": "What happened?",
+                        "answer_requirements": ["Explain the implementation"],
+                        "answer": "There is not enough information to answer.",
+                        "must_abstain": True,
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "judge.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "judge-answers",
+            str(answers),
+            str(output),
+            "--judge",
+            "coverage",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["refusal_gate"] is True
+    assert payload["refusal_gated_pairs"] == 1
+    assert payload["refusal_gate_hits"] == 2
+    assert payload["outcomes"][0]["winner"] == "tie"
+    assert payload["strata"]["checkpoint"]["must_refuse"]["pairs"] == 1
+    assert payload["strata"]["response"]["both_refuse"]["pairs"] == 1

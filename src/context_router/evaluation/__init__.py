@@ -27,8 +27,10 @@ from context_router.evaluation.judge import (
     JudgeOutcome,
     JudgePair,
     LLMJudge,
+    RefusalGatedJudge,
     build_judge_prompt,
     run_pairwise_judging,
+    summarise_judge_strata,
     summarise_wins,
 )
 from context_router.evaluation.metrics import (
@@ -45,6 +47,7 @@ __all__ = [
     "AnswerRecord",
     "CoverageJudge",
     "LLMJudge",
+    "RefusalGatedJudge",
     "Judge",
     "JudgeOutcome",
     "JudgePair",
@@ -70,6 +73,7 @@ __all__ = [
     "quality_token_frontier",
     "requirement_terms",
     "run_pairwise_judging",
+    "summarise_judge_strata",
     "summarise_wins",
     "run_arm",
 ]

@@ -21,7 +21,7 @@ from statistics import fmean
 from typing import Literal, Protocol, cast
 
 from context_router.domain import Contract
-from context_router.evaluation.scoring import deterministic_coverage
+from context_router.evaluation.scoring import deterministic_coverage, is_refusal
 from context_router.providers.openai_compatible import AnswerResult
 
 Verdict = Literal["a", "b", "tie"]
@@ -53,6 +53,35 @@ class Judge(Protocol):
     ) -> Verdict: ...
 
 
+class RefusalGatedJudge:
+    """Skip model judging when both candidates explicitly decline to answer.
+
+    The gate is deliberately narrow.  A single refusal is still sent to the delegate,
+    because ``is_refusal`` is a lexical heuristic with measured false positives and must
+    not decide which substantive answer wins.  When both sides decline, however, neither
+    answer satisfies a non-refusal requirement; treating the pair as a tie is deterministic
+    and avoids paying twice for a position-swapped comparison.
+    """
+
+    def __init__(self, delegate: Judge) -> None:
+        self.delegate = delegate
+        self.model_version = f"refusal-gated:{delegate.model_version}"
+        self.gate_hits = 0
+
+    def compare(
+        self, *, query: str, requirements: list[str], answer_a: str, answer_b: str
+    ) -> Verdict:
+        if is_refusal(answer_a) and is_refusal(answer_b):
+            self.gate_hits += 1
+            return "tie"
+        return self.delegate.compare(
+            query=query,
+            requirements=requirements,
+            answer_a=answer_a,
+            answer_b=answer_b,
+        )
+
+
 class JudgeCall(Contract):
     """One raw model call the judge made, kept so a failure can be diagnosed for free.
 
@@ -74,6 +103,7 @@ class JudgePair(Contract):
     arm_b: str
     answer_a: str
     answer_b: str
+    must_abstain: bool = False
 
 
 class JudgeOutcome(Contract):
@@ -297,3 +327,49 @@ def summarise_wins(outcomes: list[JudgeOutcome]) -> dict[str, dict[str, float]]:
         row["win_rate"] = row["wins"] / row["comparisons"] if row["comparisons"] else 0.0
         row["order_agreement"] = order_agreement
     return tally
+
+
+def _summarise_outcome_group(outcomes: list[JudgeOutcome]) -> dict[str, int | float]:
+    known_agreement = [outcome for outcome in outcomes if outcome.agreement is not None]
+    agreed = sum(outcome.agreement is True for outcome in known_agreement)
+    return {
+        "pairs": len(outcomes),
+        "agreed": agreed,
+        "disagreed": sum(outcome.agreement is False for outcome in known_agreement),
+        "order_agreement": agreed / len(known_agreement) if known_agreement else 0.0,
+        "arm_a_wins": sum(outcome.winner == "a" for outcome in outcomes),
+        "arm_b_wins": sum(outcome.winner == "b" for outcome in outcomes),
+        "ties": sum(outcome.winner == "tie" for outcome in outcomes),
+    }
+
+
+def summarise_judge_strata(
+    pairs: list[JudgePair], outcomes: list[JudgeOutcome]
+) -> dict[str, dict[str, dict[str, int | float]]]:
+    """Separate benchmark intent from the answers' observed refusal behaviour.
+
+    ``must_abstain`` identifies checkpoints whose labelled behaviour is a refusal.  The
+    response strata independently show whether both, one or neither candidate actually
+    declined.  Reporting both prevents a refusal-heavy tie bucket from hiding the judge's
+    behaviour on answerable checkpoints.
+    """
+
+    if len(pairs) != len(outcomes):
+        raise ValueError("pairs and outcomes must have the same length")
+    checkpoint: dict[str, list[JudgeOutcome]] = {"answerable": [], "must_refuse": []}
+    response: dict[str, list[JudgeOutcome]] = {
+        "neither_refuses": [],
+        "one_refuses": [],
+        "both_refuse": [],
+    }
+    for pair, outcome in zip(pairs, outcomes, strict=True):
+        if pair.sample_id != outcome.sample_id:
+            raise ValueError("pairs and outcomes must have matching sample ids")
+        checkpoint["must_refuse" if pair.must_abstain else "answerable"].append(outcome)
+        refusal_count = int(is_refusal(pair.answer_a)) + int(is_refusal(pair.answer_b))
+        response_key = ("neither_refuses", "one_refuses", "both_refuse")[refusal_count]
+        response[response_key].append(outcome)
+    return {
+        "checkpoint": {name: _summarise_outcome_group(group) for name, group in checkpoint.items()},
+        "response": {name: _summarise_outcome_group(group) for name, group in response.items()},
+    }

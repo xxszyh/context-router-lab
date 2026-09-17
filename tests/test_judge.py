@@ -8,10 +8,12 @@ from context_router.evaluation.judge import (
     JudgeOutcome,
     JudgePair,
     LLMJudge,
+    RefusalGatedJudge,
     Verdict,
     build_judge_prompt,
     parse_verdict,
     run_pairwise_judging,
+    summarise_judge_strata,
     summarise_wins,
 )
 from context_router.providers.openai_compatible import AnswerResult
@@ -103,6 +105,21 @@ class _PositionBiasedJudge:
         return "a"
 
 
+class _CountingJudge:
+    model_version = "counting"
+
+    def __init__(self, verdict: Verdict = "a") -> None:
+        self.verdict = verdict
+        self.calls = 0
+
+    def compare(
+        self, *, query: str, requirements: list[str], answer_a: str, answer_b: str
+    ) -> Verdict:
+        del query, requirements, answer_a, answer_b
+        self.calls += 1
+        return self.verdict
+
+
 class _ConsistentJudge:
     model_version = "consistent"
 
@@ -127,6 +144,53 @@ def test_swapping_agrees_for_a_judge_that_ignores_order() -> None:
 
     assert outcomes[0].agreement is True
     assert outcomes[0].winner == "a"
+
+
+def test_refusal_gate_ties_two_refusals_without_calling_the_delegate() -> None:
+    delegate = _CountingJudge()
+    judge = RefusalGatedJudge(delegate)
+
+    verdict = judge.compare(
+        query="q",
+        requirements=["explain the implementation"],
+        answer_a="上下文不足，无法回答。",
+        answer_b="The provided context does not contain that information.",
+    )
+
+    assert verdict == "tie"
+    assert delegate.calls == 0
+    assert judge.gate_hits == 1
+
+
+def test_refusal_gate_does_not_decide_when_only_one_answer_refuses() -> None:
+    delegate = _CountingJudge(verdict="b")
+    judge = RefusalGatedJudge(delegate)
+
+    verdict = judge.compare(
+        query="q",
+        requirements=["explain the implementation"],
+        answer_a="上下文不足，无法回答。",
+        answer_b="The implementation uses an append-only event store.",
+    )
+
+    assert verdict == "b"
+    assert delegate.calls == 1
+    assert judge.gate_hits == 0
+
+
+def test_refusal_gate_skips_both_swapped_calls_for_a_double_refusal_pair() -> None:
+    delegate = _CountingJudge()
+    judge = RefusalGatedJudge(delegate)
+
+    outcomes = run_pairwise_judging(
+        judge,
+        [pair("无法据此确定。", "There is not enough information to answer.")],
+    )
+
+    assert outcomes[0].winner == "tie"
+    assert outcomes[0].agreement is True
+    assert delegate.calls == 0
+    assert judge.gate_hits == 2
 
 
 def test_verdicts_are_resolved_onto_arms_not_positions() -> None:
@@ -173,6 +237,50 @@ def test_summary_counts_wins_and_reports_order_agreement() -> None:
     assert tally["hybrid_router"]["win_rate"] == 0.5
     assert tally["full_history"]["losses"] == 1
     assert tally["full_history"]["order_agreement"] == 0.5
+
+
+def test_judge_summary_separates_checkpoint_and_response_refusal_strata() -> None:
+    pairs = [
+        pair("无法回答。", "No information is available.").model_copy(
+            update={"sample_id": "must-refuse", "must_abstain": True}
+        ),
+        pair("无法回答。", BETTER).model_copy(update={"sample_id": "one-refusal"}),
+        pair(BETTER, WORSE).model_copy(update={"sample_id": "no-refusal"}),
+    ]
+    outcomes = [
+        JudgeOutcome(
+            sample_id="must-refuse",
+            arm_a="hybrid_router",
+            arm_b="full_history",
+            winner="tie",
+            swapped=True,
+            agreement=True,
+        ),
+        JudgeOutcome(
+            sample_id="one-refusal",
+            arm_a="hybrid_router",
+            arm_b="full_history",
+            winner="b",
+            swapped=True,
+            agreement=True,
+        ),
+        JudgeOutcome(
+            sample_id="no-refusal",
+            arm_a="hybrid_router",
+            arm_b="full_history",
+            winner="a",
+            swapped=True,
+            agreement=False,
+        ),
+    ]
+
+    summary = summarise_judge_strata(pairs, outcomes)
+
+    assert summary["checkpoint"]["must_refuse"]["pairs"] == 1
+    assert summary["checkpoint"]["answerable"]["pairs"] == 2
+    assert summary["response"]["both_refuse"]["ties"] == 1
+    assert summary["response"]["one_refuses"]["arm_b_wins"] == 1
+    assert summary["response"]["neither_refuses"]["disagreed"] == 1
 
 
 class _ScriptedModel:
