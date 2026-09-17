@@ -36,6 +36,16 @@ see below.*
 candidate required-context recall 1.000, candidate misses 0, selection losses 0, but selection
 precision 0.591 with 540 excess contexts. *Grade: exact. Measured by Codex's stage diagnostics.*
 
+**6. Real replay has a working context-level label, if a weaker one.** "Which contexts does the
+answer draw on" is measurable lexically on the corrected reply text: over 23 checkpoints,
+**micro recall 0.880, precision 0.710, F1 0.786**, scoring the reply against each context's
+member events. Deterministic, no model, no cost, re-derivable by anyone. It is a property of the
+answer text, not a counterfactual, so it is **not** `required_context_ids` and does not rescue
+the routing gates. What it does is replace an assumption about label quality with a measurement:
+65% exact-set agreement with careful reading, and the disagreements are enumerated in v0.3.
+*Grade: measured against a 23-checkpoint sample; the descriptors were the wrong signal and had
+scored 21-29%.*
+
 ## Not established
 
 **Answer quality, in magnitude.** The judge agrees with itself across answer order only **85%**
@@ -49,6 +59,7 @@ the operator can change what it resolves to. Marked as such in the README and in
 `answer-quality-experiment.md`.
 
 **The real-replay routing gates.** See blockers.
+
 
 ## Blockers
 
@@ -73,10 +84,10 @@ results.
    state what a correct answer must contain. No counterfactual, no retrieval. Already checked on
    five: requirements are writable by reading and the existing scorer discriminates 1.00 against
    the checkpoint's own answer and 0.00 against another's. *Offline.*
-2. **Re-open the lexical question on the corrected reply text.** "Which contexts does this
-   answer draw on, judged lexically" has never been properly tested — the three attempts that
-   tried it read tool calls instead of replies. *Offline, and it may change whether step 3 is
-   needed.*
+2. ~~Re-open the lexical question on the corrected reply text~~ — **done, and it works**:
+   micro recall 0.880 / F1 0.786 for "which contexts does the answer draw on", scoring against
+   member events rather than descriptors. The context-level label for real replay exists, is
+   deterministic, and costs nothing. Wired into the schema as the weaker label it is.
 3. **The answer-quality gate on real conversations** (v0.2 work package E). Same arms, one
    pinned model, blinded pairwise judging, token cost reported. *Needs a documented model.*
 
