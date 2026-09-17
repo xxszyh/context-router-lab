@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated, Any, cast
@@ -11,10 +12,12 @@ import typer
 
 from context_router.assembly import assemble_context
 from context_router.datasets import generate_synthetic_dataset, validate_dataset
+from context_router.datasets.real_replay import RealReplayAnnotation
 from context_router.domain import (
     AssemblyRequest,
     BenchmarkQuery,
     FlatContext,
+    RawEvent,
     RouteRequest,
 )
 from context_router.evaluation import (
@@ -44,12 +47,19 @@ from context_router.evaluation.judge import (
     LLMJudge,
     RefusalGatedJudge,
 )
+from context_router.evaluation.necessity import (
+    context_material,
+    control_failures,
+    required_from_ablations,
+    run_ablations,
+)
 from context_router.importers import import_claude_code
 from context_router.providers import HashEmbeddingProvider
 from context_router.providers.anthropic import (
     AnthropicCompatibleAnswerProvider,
     AnthropicCompatibleVerdictModel,
 )
+from context_router.retrieval import BM25Index, LexicalAnalyzer
 from context_router.routing import ContextRouter
 from context_router.routing.calibration import PlattContextRanker
 from context_router.routing.policy import PolicyObservation, SelectionPolicyTuner
@@ -473,6 +483,144 @@ def judge_answers_command(
     failures = getattr(base_judge, "parse_failures", 0)
     if failures:
         typer.echo(f"WARNING: {failures} unparseable judge replies")
+
+
+@app.command("annotate-necessity")
+def annotate_necessity_command(
+    annotations: Annotated[Path, typer.Argument(help="Real-replay annotation file")],
+    database: Annotated[Path, typer.Argument(help="Local event store")],
+    output: Annotated[Path, typer.Argument()],
+    model: Annotated[str | None, typer.Option(help="Pinned model id")] = None,
+    base_url: Annotated[str | None, typer.Option()] = None,
+    auth_style: Annotated[str, typer.Option(help="bearer or x-api-key")] = "bearer",
+    max_tokens: Annotated[int, typer.Option(min=16)] = 16,
+    limit: Annotated[int, typer.Option(min=1, help="Checkpoints to process")] = 26,
+    per_context: Annotated[int, typer.Option(min=1, help="Events per context")] = 6,
+) -> None:
+    """Derive `required_context_ids` by ablation, and compare with the human labels.
+
+    One call per (checkpoint, active context). The difference against the hand labels is the
+    disagreement proxy the recheck could not produce: it asks a counterfactual judge instead
+    of measuring text overlap, which three attempts showed cannot answer this question.
+    """
+
+    api_key = os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
+    resolved_base = base_url or os.environ.get("ANTHROPIC_BASE_URL", "")
+    resolved_model = model or os.environ.get("ANTHROPIC_MODEL", "")
+    if not (api_key and resolved_base and resolved_model):
+        raise typer.BadParameter("need ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL and a model")
+    judge = AnthropicCompatibleAnswerProvider(
+        base_url=resolved_base,
+        api_key=api_key,
+        model=resolved_model,
+        auth_style=auth_style,  # type: ignore[arg-type]
+        max_tokens=max_tokens,
+    )
+    annotation = RealReplayAnnotation.model_validate_json(annotations.read_text(encoding="utf-8"))
+    store = SQLiteEventStore(database)
+    events = store.list_events(annotation.source_session_id)
+    by_seq = {event.sequence: event for event in events}
+    sequence_of = {event.event_id: event.sequence for event in events}
+    member_of: dict[str, list[RawEvent]] = {c.context_id: [] for c in annotation.contexts}
+    for context_id, event_ids in annotation.context_members.items():
+        member_of[context_id] = sorted(
+            (by_seq[sequence_of[e]] for e in event_ids if e in sequence_of),
+            key=lambda event: event.sequence,
+        )
+    names = {c.context_id: c.name for c in annotation.contexts}
+    analyzer = LexicalAnalyzer()
+
+    rows: list[dict[str, Any]] = []
+    totals = {"calls": 0, "unreadable": 0, "control_failures": 0}
+    started = time.time()
+    for index, checkpoint in enumerate(annotation.checkpoints[:limit], start=1):
+        seq = checkpoint.as_of_sequence
+        query = by_seq[seq].content
+        recent = [
+            event
+            for event in events
+            if event.sequence < seq and event.actor in ("user", "assistant")
+        ][-6:]
+        recent_window = "\n".join(f"{e.actor}: {e.content[:300]}" for e in recent)
+
+        materials: dict[str, str] = {}
+        controls: set[str] = set()
+        plausibility: dict[str, float] = {}
+        for context_id, context_events in member_of.items():
+            if not any(event.sequence < seq for event in context_events):
+                continue  # the context does not exist yet at this checkpoint
+            usable = [event for event in context_events if event.sequence < seq]
+            overlap = BM25Index({e.event_id: e.content for e in usable}, analyzer=analyzer).rank(
+                query, per_context
+            )
+            if not overlap:
+                controls.add(context_id)
+            materials[context_id] = context_material(
+                usable, query, analyzer=analyzer, limit=per_context
+            )
+        if not materials:
+            continue
+        # The weakest candidate is the control. Almost every context overlaps the query
+        # lexically, so "no overlap" almost never fires; the least plausible candidate is the
+        # one an ablation should be able to remove without cost, and a "no" there is the alarm.
+        if len(materials) > 1:
+            weakest = min(plausibility, key=lambda key: plausibility[key])
+            controls.add(weakest)
+        run = run_ablations(
+            sample_id=checkpoint.sample_id,
+            query=query,
+            recent_window=recent_window,
+            materials=materials,
+            context_names=names,
+            control_context_ids=controls,
+            judge=judge,
+        )
+        derived = required_from_ablations(run.verdicts)
+        failed_controls = control_failures(run.verdicts)
+        totals["calls"] += len(materials)
+        totals["unreadable"] += run.unreadable
+        totals["control_failures"] += len(failed_controls)
+        agrees = derived == sorted(checkpoint.required_context_ids)
+        rows.append(
+            {
+                "sample_id": checkpoint.sample_id,
+                "query_type": checkpoint.query_type,
+                "human_required": sorted(checkpoint.required_context_ids),
+                "derived_required": derived,
+                "agrees": agrees,
+                "control_failures": failed_controls,
+                "candidate_contexts": sorted(materials),
+                "unreadable": run.unreadable,
+            }
+        )
+        typer.echo(
+            f"  [{index}/{min(limit, len(annotation.checkpoints))}] {checkpoint.sample_id} "
+            f"cand={len(materials)} human={len(checkpoint.required_context_ids)} "
+            f"derived={len(derived)} {'agree' if agrees else 'DIFFER'}"
+            + (f" control-failures={failed_controls}" if failed_controls else "")
+        )
+
+    agreed = sum(1 for row in rows if row["agrees"])
+    _write_json(
+        output,
+        {
+            "schema_version": "1.0",
+            "judge_model": resolved_model,
+            "checkpoints": len(rows),
+            "calls": totals["calls"],
+            "unreadable": totals["unreadable"],
+            "control_failures": totals["control_failures"],
+            "exact_set_agreement": agreed / len(rows) if rows else 0.0,
+            "seconds": round(time.time() - started, 1),
+            "rows": rows,
+        },
+    )
+    typer.echo(
+        f"\n{resolved_model}: {totals['calls']} calls, exact-set agreement "
+        f"{agreed}/{len(rows)}, unreadable {totals['unreadable']}, "
+        f"control failures {totals['control_failures']}"
+    )
+    typer.echo(str(output))
 
 
 @app.command("benchmark")
