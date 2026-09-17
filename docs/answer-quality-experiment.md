@@ -1,4 +1,4 @@
-# Answer-quality experiment — first run and its three instrument failures
+# Answer-quality experiment — four answer rounds, six judge runs, and a limit
 
 Date: 2026-09-16. Model: `deepseek-v4.1-flash` (see *Reproducibility* — this identifier is a
 private proxy alias and is **not** reproducible by anyone else).
@@ -10,8 +10,10 @@ This document records the first attempt to answer the question the routing bench
 > evidence recall a metric that moves independently of what the model can do?
 
 It is written as a report of what happened, including three instrument failures that made
-the first two runs unusable. Those failures are the most transferable part: each one is a
-case of measuring something other than what was claimed.
+the first two runs unusable and four judge iterations that each traded one defect for
+another. Those failures are the most transferable part: each one is a case of measuring
+something other than what was claimed, and the last of them is a case of a single metric
+being watched while the thing that mattered went unchecked.
 
 ---
 
@@ -93,7 +95,23 @@ recalling every evidence set. The oracle's remaining advantage is **tokens, not 
 
 ---
 
-## 3. The judge, and two more instrument failures
+## 3. The judge: six runs, two instrument failures, and a limit
+
+Each of the six runs changed one thing, and the arc is easier to read before the detail.
+`q-03` is `syn-000-q-03`, the one pair that can be adjudicated from the answer text alone —
+**both answers declined there, so the correct verdict is `tie`**.
+
+| run | change | order agreement | calls at cap | output tokens | `q-03` |
+|---|---|---:|---:|---:|---|
+| 3 | — | 80% | — | 30 576 | `a` ✗ |
+| 4 | anchor the verdict in the requirements | 90% | — | 47 220 | **`tie` ✓** |
+| 5 | budget 2 048 → 4 096 | **100%** | 3 | 45 830 | `a` ✗ |
+| 6 | bound the analysis | **85%** | **0** | **16 396** | `a` ✗ |
+
+**No run fixed `q-03` except by accident.** Run 5's perfect order agreement sits next to a
+wrong verdict on the only pair whose answer is knowable, and run 6's cost win sits next to a
+consistency loss. Reading the arc run by run is what makes that visible; reading any single
+run's headline does not.
 
 ### Failure 2 — the first judge run threw away its own evidence
 
@@ -133,6 +151,25 @@ never reached a verdict — the model thought past its 2 048-token budget. The r
 most of them. The count rose in run 4 because the procedure below asks the judge to work
 through the requirements one at a time, which is more thinking, and the budget did not grow
 with it.
+
+### Judge result (run 3, stable with run 2)
+
+| | count |
+|---|---:|
+| `hybrid_router` wins | **10** |
+| `query_recent_only` wins | **2** |
+| ties | 8 |
+| order agreement | **16 / 20 (80%)** |
+| judge tokens | 8 539 in / 30 576 out |
+
+**Four of the eight ties are position-bias artefacts, not equivalence.** A verdict that
+flips when the answers are exchanged is a verdict about the position, which is why every
+pair is judged twice and a disagreement is recorded as `tie` with `agreement=False` rather
+than averaged away.
+
+**Five of the eight ties involve a refusal** (2 both refused, 3 one side refused). The judge
+is largely saying "neither answer answered" — a correct verdict that says nothing about the
+relative quality of the two memories.
 
 ### Fixing the order agreement
 
@@ -258,25 +295,6 @@ measured track record.
 A gate would also make the remaining prompt tuning safe to stop, since correctness would no
 longer depend on the instruction being obeyed.
 
-### Judge result (run 3, stable with run 2)
-
-| | count |
-|---|---:|
-| `hybrid_router` wins | **10** |
-| `query_recent_only` wins | **2** |
-| ties | 8 |
-| order agreement | **16 / 20 (80%)** |
-| judge tokens | 8 539 in / 30 576 out |
-
-**Four of the eight ties are position-bias artefacts, not equivalence.** A verdict that
-flips when the answers are exchanged is a verdict about the position, which is why every
-pair is judged twice and a disagreement is recorded as `tie` with `agreement=False` rather
-than averaged away.
-
-**Five of the eight ties involve a refusal** (2 both refused, 3 one side refused). The judge
-is largely saying "neither answer answered" — a correct verdict that says nothing about the
-relative quality of the two memories.
-
 ---
 
 ## 4. Cross-validation
@@ -373,8 +391,11 @@ Established:
 
 Not established:
 
-- Any trustworthy **magnitude** of answer-quality difference. The judge's order agreement
-  is 80%, ~20% of its calls produced no verdict, and the tie bucket is dominated by refusals.
+- Any trustworthy **magnitude** of answer-quality difference. Six judge runs ended at 85%
+  order agreement with no parse failures, but the judge is still **wrong on the one pair
+  whose correct answer is knowable** (`syn-000-q-03`, section 3), half the ties involve a
+  refusal, and n is 20. The consistency metric was brought under control and the correctness
+  metric was not.
 - **Anything about a documented model.** See below.
 - The **cost axis**: the quality–token frontier is not computable from this run (see
   limitation 4).
@@ -413,10 +434,10 @@ Not established:
 
 1. ~~Run `CoverageJudge` over the same pairs~~ — **done, section 5.** Result: identical
    totals, 30% pairwise disagreement, and it refuted the refusal hypothesis.
-2. **Fix the judge's order agreement before anything else.** It is 80%, and a verdict that
-   changes with answer order one time in five makes every downstream number unusable.
-   Constrain the output format so the verdict must appear in a text block after the
-   analysis, then re-measure the order agreement on the same 20 pairs.
+2. ~~Fix the judge's order agreement~~ — **done, runs 4 and 5**, 80% → 90% → 100%, by
+   anchoring the verdict in the requirements and defining a tie. Run 6 then traded it back to
+   85% for a 64% cost reduction. **The lesson is not the number but the method: run 5 scored
+   100% while getting `syn-000-q-03` wrong, because only the consistency metric was watched.**
 3. **Report refusal checkpoints separately** instead of mixing them into the win table,
    since they are 5 of the 8 ties and all 6 judge disagreements.
 4. ~~Bound the judge's analysis~~ — **done, run 6.** It fixed the cost (−64% output tokens,
@@ -451,8 +472,22 @@ Router 与 Oracle 在答案质量上**无法区分**，与两者证据召回都�
    回复为空 → 兜底从 thinking 捞回（仅判词模型；**答案 provider 刻意不这么做，因为人不能把
    思考过程当答案看**）+ 空回复重试 + 预算提到 2048。解析失败 14 → 7 → **1**。
 
-**量级仍不可信**：Judge 顺序一致性仅 **80%**（8 个平局里 4 个是位置偏差产物），约 20% 调用
-产不出判词，8 个平局里 5 个涉及拒答。**n = 20，且生成与评判是同一个模型（自偏好混淆）。**
+**Judge 又跑了四轮（第 3～6 轮），每一轮都用一个缺陷换了另一个缺陷：**
+
+| 轮次 | 改动 | 顺序一致性 | 撞 cap | 输出 token | `q-03`（正确=`tie`） |
+|---|---|---:|---:|---:|---|
+| 3 | — | 80% | — | 30 576 | `a` ✗ |
+| 4 | 锚定判词（逐条判定 + **定义 tie**） | 90% | — | 47 220 | **`tie` ✓** |
+| 5 | 预算 2048→4096 | **100%** | 3 | 45 830 | `a` ✗ |
+| 6 | **限制分析长度** | **85%** | **0** | **16 396** | `a` ✗ |
+
+**第 5 轮的 100% 是陷阱**：那一轮**唯一能人工裁定的那一对（`q-03`，双方都拒答）判错了**——它奖励了"复述要求词然后拒答"。而**我当轮只盯一致性、没看它**。**第 6 轮推翻了第 5 轮的假设**：限制思考后 `q-03` 仍然是 `a`，四轮下来它 是 `a`/`tie`/`a`/`a` —— **v4 是异常值、`a` 是基率，Judge 默认就判错**。所以这**不是思考长度问题，而是内容判断问题**：我写的 instruction「复述要求词不算满足」**根本不起作用**。
+
+**⇒ 提示词工程在这个 Judge 上已到极限。** 唯一有实测记录的机制是仓库里已有的 `is_refusal`（当初靠它发现词法指标 20–25% 假阳性），**应当把它做成判词硬门**（双方都拒答即判平，无论 Judge 说了什么）——这样正确性就不再依赖"说明书被遵守"。
+
+**量级仍不可信**：第 6 轮一致性 **85%**、解析失败 0、成本降 64%，但 `q-03` 仍判错，且 10 个平局里 5 个涉及拒答。**n = 20，且生成与评判是同一个模型（自偏好混淆）。**
+
+**方法论教训（本报告最该带走的一条）**：我在这条链上改了四轮，**每一轮只测一个指标**——第 4 轮盯一致性、第 5 轮盯失败数、第 6 轮盯成本。**如果从第 3 轮起就把 `q-03` 当固定判据一起看，第 5 轮那个"100%"当场就会被拆穿。单一指标会让人在错误的路上走四轮。**
 
 **最重要的限制**：`deepseek-v4.1-flash` 是**私有代理别名**，他人不可复现、运营方可随时改
 指向。**这批数字是示例性的，不是可发表的。** 另外代理对**逐字节相同的请求**回报不一致的
