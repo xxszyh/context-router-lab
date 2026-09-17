@@ -97,7 +97,59 @@ def test_judge_answers_applies_the_double_refusal_gate_by_default(tmp_path: Path
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["refusal_gate"] is True
     assert payload["refusal_gated_pairs"] == 1
-    assert payload["refusal_gate_hits"] == 2
+    assert payload["refusal_gate_hits"] == 1
+    assert payload["agreed"] == 0
+    assert payload["judged_pairs"] == 0
     assert payload["outcomes"][0]["winner"] == "tie"
+    assert payload["outcomes"][0]["agreement"] is None
+    assert payload["tally"] == {}, "the primary table excludes must-refuse checkpoints"
+    assert payload["overall_tally"], "the all-pair diagnostic remains available explicitly"
     assert payload["strata"]["checkpoint"]["must_refuse"]["pairs"] == 1
     assert payload["strata"]["response"]["both_refuse"]["pairs"] == 1
+
+
+def test_judge_answers_rejects_missing_or_inconsistent_abstain_labels(tmp_path: Path) -> None:
+    answers = tmp_path / "answers.json"
+    answers.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "sample_id": "s-01",
+                        "arm": "hybrid_router",
+                        "query": "q",
+                        "answer_requirements": ["r"],
+                        "answer": "a",
+                        "must_abstain": True,
+                    },
+                    {
+                        "sample_id": "s-01",
+                        "arm": "query_recent_only",
+                        "query": "q",
+                        "answer_requirements": ["r"],
+                        "answer": "b",
+                        "must_abstain": False,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        ["judge-answers", str(answers), str(tmp_path / "judge.json"), "--judge", "coverage"],
+    )
+
+    assert result.exit_code != 0
+    assert "must_abstain labels disagree" in result.output
+
+    payload = json.loads(answers.read_text(encoding="utf-8"))
+    del payload["records"][1]["must_abstain"]
+    answers.write_text(json.dumps(payload), encoding="utf-8")
+    missing = runner.invoke(
+        app,
+        ["judge-answers", str(answers), str(tmp_path / "judge.json"), "--judge", "coverage"],
+    )
+    assert missing.exit_code != 0
+    assert "need an explicit boolean must_abstain label" in missing.output

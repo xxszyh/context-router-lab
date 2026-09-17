@@ -381,6 +381,16 @@ def judge_answers_command(
     for sample_id, arms in by_sample.items():
         if arm_a in arms and arm_b in arms:
             left, right = arms[arm_a], arms[arm_b]
+            if "must_abstain" not in left or "must_abstain" not in right:
+                raise typer.BadParameter(
+                    f"{sample_id}: both arms need an explicit boolean must_abstain label"
+                )
+            left_must_abstain = left["must_abstain"]
+            right_must_abstain = right["must_abstain"]
+            if not isinstance(left_must_abstain, bool) or not isinstance(right_must_abstain, bool):
+                raise typer.BadParameter(f"{sample_id}: must_abstain labels must be boolean")
+            if left_must_abstain != right_must_abstain:
+                raise typer.BadParameter(f"{sample_id}: must_abstain labels disagree between arms")
             pairs.append(
                 JudgePair(
                     sample_id=sample_id,
@@ -390,7 +400,7 @@ def judge_answers_command(
                     arm_b=arm_b,
                     answer_a=left["answer"],
                     answer_b=right["answer"],
-                    must_abstain=bool(left.get("must_abstain", False)),
+                    must_abstain=left_must_abstain,
                 )
             )
         if len(pairs) >= limit:
@@ -426,7 +436,11 @@ def judge_answers_command(
         f"judge={judge.model_version}"
     )
     outcomes = run_pairwise_judging(judge, pairs, swap=True)
-    tally = summarise_wins(outcomes)
+    overall_tally = summarise_wins(outcomes)
+    answerable_outcomes = [
+        outcome for pair, outcome in zip(pairs, outcomes, strict=True) if not pair.must_abstain
+    ]
+    tally = summarise_wins(answerable_outcomes)
     strata = summarise_judge_strata(pairs, outcomes)
     for outcome in outcomes:
         typer.echo(
@@ -440,15 +454,18 @@ def judge_answers_command(
             "arm_a": arm_a,
             "arm_b": arm_b,
             "pairs": len(pairs),
+            "judged_pairs": sum(outcome.agreement is not None for outcome in outcomes),
             "agreed": sum(1 for outcome in outcomes if outcome.agreement),
             "ties": sum(1 for outcome in outcomes if outcome.winner == "tie"),
             "refusal_gate": refusal_gate,
             "refusal_gate_hits": getattr(judge, "gate_hits", 0),
-            "refusal_gated_pairs": getattr(judge, "gate_hits", 0) // 2,
+            "refusal_gated_pairs": getattr(judge, "gate_hits", 0),
             "parse_failures": getattr(base_judge, "parse_failures", 0),
             "judge_input_tokens": getattr(base_judge, "input_tokens", 0),
             "judge_output_tokens": getattr(base_judge, "output_tokens", 0),
             "tally": tally,
+            "tally_scope": "answerable_checkpoints_only",
+            "overall_tally": overall_tally,
             "strata": strata,
             "judge_calls": [c.model_dump(mode="json") for c in getattr(base_judge, "calls", [])],
             "outcomes": [outcome.model_dump(mode="json") for outcome in outcomes],

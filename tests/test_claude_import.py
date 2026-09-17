@@ -91,3 +91,40 @@ def test_claude_import_preserves_visible_turns_and_tool_lineage(tmp_path) -> Non
     assert tool_result.parent_event_id == tool_call.event_id
     assert tool_call.payload["claude_tool_use_id"] == "toolu-1"
     assert all(event.payload["source"] == "claude-code" for event in events)
+
+
+def test_including_subagents_keeps_their_sequences_in_separate_sessions(tmp_path) -> None:
+    project = tmp_path / "projects" / "C--repo"
+    subagents = project / "parent-session" / "subagents"
+    subagents.mkdir(parents=True)
+    write_jsonl(
+        project / "parent-session.jsonl",
+        [
+            {
+                "sessionId": "parent-session",
+                "type": "user",
+                "uuid": "parent-turn",
+                "message": {"role": "user", "content": "parent"},
+            }
+        ],
+    )
+    write_jsonl(
+        subagents / "agent-child.jsonl",
+        [
+            {
+                "sessionId": "parent-session",
+                "type": "user",
+                "uuid": "child-turn",
+                "message": {"role": "user", "content": "child"},
+            }
+        ],
+    )
+    store = SQLiteEventStore(tmp_path / "events.db")
+
+    report = import_claude_code(project.parent, store, include_subagents=True)
+
+    assert report.imported_events == 2
+    assert [event.content for event in store.list_events("claude:parent-session")] == ["parent"]
+    assert [
+        event.content for event in store.list_events("claude:parent-session:subagent:agent-child")
+    ] == ["child"]

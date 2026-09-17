@@ -23,11 +23,17 @@ answers decline. It deliberately does not decide a one-sided refusal: the detect
 and its known false positives must not be allowed to choose a winner. Under the normal swapped
 protocol, one gated pair therefore avoids two paid calls. `ctxlab judge-answers` enables this
 by default, records gate hits, and supports `--no-refusal-gate` for the ablation.
+Because the delegate never judged a gated pair, that outcome has `agreement=null` and is
+excluded from the judge's order-agreement denominator rather than credited as a consistent
+decision.
 
 The result JSON also reports two independent strata: labelled checkpoint intent
 (`answerable` / `must_refuse`) and observed answer behaviour (`neither_refuses` /
 `one_refuses` / `both_refuse`). This completes the reporting change requested below without
-collapsing "the benchmark expected a refusal" into "the model happened to refuse".
+collapsing "the benchmark expected a refusal" into "the model happened to refuse". The
+primary `tally` now covers answerable checkpoints only; the mixed diagnostic is retained under
+the explicit name `overall_tally`. Both arms must carry the same boolean `must_abstain` label,
+or the CLI stops instead of silently classifying the checkpoint as answerable.
 
 This is an implementation result, not a new empirical row in the tables. The original
 `answers.json` and private-provider credentials were not retained in the current workspace,

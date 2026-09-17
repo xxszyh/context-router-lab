@@ -293,9 +293,11 @@ refusal gate, so if **both** answers explicitly decline it records a tie without
 position-swapped model call. A single refusal still goes to the delegate because `is_refusal`
 is a lexical heuristic. Results now include separate checkpoint strata (`answerable` versus
 `must_refuse`) and response strata (`neither`, `one`, or `both` refusing). Use
-`--no-refusal-gate` only for an ablation. The original answer artefact and private credentials
-were not retained, so this implementation has offline regression coverage but no claimed
-seventh live judge run.
+`--no-refusal-gate` only for an ablation. Gated pairs are excluded from the judge's order-
+agreement denominator, and the primary `tally` contains answerable checkpoints only;
+`overall_tally` remains an explicitly named diagnostic. The original answer artefact and
+private credentials were not retained, so this implementation has offline regression coverage
+but no claimed seventh live judge run.
 
 **These numbers are illustrative and not reproducible.** The model used is a private proxy
 alias, not a documented identifier. Read

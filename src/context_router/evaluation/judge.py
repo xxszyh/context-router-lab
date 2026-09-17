@@ -71,8 +71,8 @@ class RefusalGatedJudge:
     def compare(
         self, *, query: str, requirements: list[str], answer_a: str, answer_b: str
     ) -> Verdict:
-        if is_refusal(answer_a) and is_refusal(answer_b):
-            self.gate_hits += 1
+        if self.should_gate(answer_a=answer_a, answer_b=answer_b):
+            self.record_gate()
             return "tie"
         return self.delegate.compare(
             query=query,
@@ -80,6 +80,12 @@ class RefusalGatedJudge:
             answer_a=answer_a,
             answer_b=answer_b,
         )
+
+    def should_gate(self, *, answer_a: str, answer_b: str) -> bool:
+        return is_refusal(answer_a) and is_refusal(answer_b)
+
+    def record_gate(self) -> None:
+        self.gate_hits += 1
 
 
 class JudgeCall(Contract):
@@ -115,6 +121,7 @@ class JudgeOutcome(Contract):
     swapped: bool
     #: None when only one order was judged; False means the two orders disagreed.
     agreement: bool | None
+    decision_source: Literal["judge", "refusal_gate"] = "judge"
 
 
 def build_judge_prompt(*, query: str, requirements: list[str], answer_a: str, answer_b: str) -> str:
@@ -264,6 +271,22 @@ def run_pairwise_judging(
 
     outcomes: list[JudgeOutcome] = []
     for pair in pairs:
+        if isinstance(judge, RefusalGatedJudge) and judge.should_gate(
+            answer_a=pair.answer_a, answer_b=pair.answer_b
+        ):
+            judge.record_gate()
+            outcomes.append(
+                JudgeOutcome(
+                    sample_id=pair.sample_id,
+                    arm_a=pair.arm_a,
+                    arm_b=pair.arm_b,
+                    winner="tie",
+                    swapped=False,
+                    agreement=None,
+                    decision_source="refusal_gate",
+                )
+            )
+            continue
         forward = judge.compare(
             query=pair.query,
             requirements=pair.requirements,

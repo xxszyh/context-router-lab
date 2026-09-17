@@ -188,9 +188,11 @@ def test_refusal_gate_skips_both_swapped_calls_for_a_double_refusal_pair() -> No
     )
 
     assert outcomes[0].winner == "tie"
-    assert outcomes[0].agreement is True
+    assert outcomes[0].swapped is False
+    assert outcomes[0].agreement is None
+    assert outcomes[0].decision_source == "refusal_gate"
     assert delegate.calls == 0
-    assert judge.gate_hits == 2
+    assert judge.gate_hits == 1
 
 
 def test_verdicts_are_resolved_onto_arms_not_positions() -> None:

@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from context_router.domain import RawEvent
+from context_router.domain import Actor, EventKind, RawEvent
 from context_router.storage import SQLiteEventStore
 
 
@@ -24,8 +24,8 @@ class ClaudeImportReport:
 
 @dataclass(frozen=True)
 class _ImportedBlock:
-    actor: str
-    kind: str
+    actor: Actor
+    kind: EventKind
     content: str
     payload: dict[str, Any]
     tool_use_id: str | None = None
@@ -58,6 +58,10 @@ def _content_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
+def _message_actor(record_type: object) -> Actor:
+    return "assistant" if record_type == "assistant" else "user"
+
+
 def _visible_blocks(record: dict[str, Any]) -> tuple[list[_ImportedBlock], int]:
     record_type = record.get("type")
     message = record.get("message")
@@ -67,8 +71,7 @@ def _visible_blocks(record: dict[str, Any]) -> tuple[list[_ImportedBlock], int]:
     if isinstance(content, str):
         if not content.strip():
             return [], 0
-        actor = "assistant" if record_type == "assistant" else "user"
-        return [_ImportedBlock(actor, "message", content, {})], 0
+        return [_ImportedBlock(_message_actor(record_type), "message", content, {})], 0
     if not isinstance(content, list):
         return [], 0
 
@@ -81,8 +84,7 @@ def _visible_blocks(record: dict[str, Any]) -> tuple[list[_ImportedBlock], int]:
         if block_type == "thinking":
             skipped_thinking += 1
         elif block_type == "text" and isinstance(block.get("text"), str):
-            actor = "assistant" if record_type == "assistant" else "user"
-            blocks.append(_ImportedBlock(actor, "message", block["text"], {}))
+            blocks.append(_ImportedBlock(_message_actor(record_type), "message", block["text"], {}))
         elif block_type == "tool_use":
             name = str(block.get("name") or "unknown_tool")
             tool_input = block.get("input") or {}
@@ -122,7 +124,7 @@ def _visible_blocks(record: dict[str, Any]) -> tuple[list[_ImportedBlock], int]:
             source: dict[str, Any] = source_value if isinstance(source_value, dict) else {}
             blocks.append(
                 _ImportedBlock(
-                    "user" if record_type == "user" else "assistant",
+                    _message_actor(record_type),
                     "artifact",
                     "[image attachment]",
                     {
@@ -143,6 +145,13 @@ def _transcript_files(root: Path, include_subagents: bool) -> list[Path]:
             continue
         files.append(path)
     return sorted(files)
+
+
+def _source_session_id(path: Path, record_session: object) -> str:
+    base = f"claude:{record_session}"
+    if "subagents" in path.parts:
+        return f"{base}:subagent:{path.stem}"
+    return base
 
 
 def import_claude_code(
@@ -182,7 +191,7 @@ def import_claude_code(
                     continue
                 record_session = record.get("sessionId") or record.get("session_id") or path.stem
                 if session_id is None:
-                    session_id = f"claude:{record_session}"
+                    session_id = _source_session_id(path, record_session)
                     existing_ids = {event.event_id for event in store.list_events(session_id)}
                 blocks, thinking_count = _visible_blocks(record)
                 skipped_thinking += thinking_count
@@ -195,7 +204,7 @@ def import_claude_code(
                 record_first_event: str | None = None
                 for block_index, block in enumerate(blocks):
                     emitted_position += 1
-                    event_id = f"claude:{record_session}:{record_uuid}:{block_index}:{block.kind}"
+                    event_id = f"{session_id}:{record_uuid}:{block_index}:{block.kind}"
                     if event_id in existing_ids:
                         existing_events += 1
                         if block.tool_use_id:
@@ -222,8 +231,8 @@ def import_claude_code(
                         session_id=session_id,
                         sequence=emitted_position,
                         occurred_at=occurred_at,
-                        actor=block.actor,  # type: ignore[arg-type]
-                        kind=block.kind,  # type: ignore[arg-type]
+                        actor=block.actor,
+                        kind=block.kind,
                         content=block.content,
                         payload=payload,
                         parent_event_id=parent_event_id,
