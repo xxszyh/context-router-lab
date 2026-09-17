@@ -2969,6 +2969,10 @@
   "checkpoints": [
     {
       "sample_id": "real-d22f2593-q-0107",
+      "answer_requirements": [
+        "覆盖「对着 Codex 指出的问题核了一遍」并跑了「数值对比」",
+        "提到「守恒性和网格收敛」测试，以及加「独立的高精度参照解（BDF 时间积分）」"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:e2d21e0a-32b8-4aee-b99d-b9ed79114d4c:0:message",
       "as_of_sequence": 107,
       "query_type": "cross_context",
@@ -2995,6 +2999,11 @@
     },
     {
       "sample_id": "real-d22f2593-q-0157",
+      "answer_requirements": [
+        "指出「35 格里 15 格四位小数对不上」，且集中在「1.0 cm 以外的区域」",
+        "指出必须改「第 46 行」右界面扩散系数取平均，并建议「Δr ≤ 2.5e-5」",
+        "提到「温度场根本没实现」「result1.xlsx」没写等未做项"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:c32a948f-610a-49c0-837d-f00e06d673f1:0:message",
       "as_of_sequence": 157,
       "query_type": "short_coreference",
@@ -3020,6 +3029,11 @@
     },
     {
       "sample_id": "real-d22f2593-q-0193",
+      "answer_requirements": [
+        "承认先前跑的是「保存之前的那一版」，并给出 22:54 / 23:03 时间线",
+        "指出旧版「dr=1e-4」，新保存改动是「0.01*0.01*0.5」",
+        "重跑后「全部 35 格四位小数」与收敛值一致，即「0 / 35 不一致」"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:315f557c-ea1e-473b-af16-df21dc05982c:0:message",
       "as_of_sequence": 193,
       "query_type": "continue",
@@ -3045,6 +3059,7 @@
     },
     {
       "sample_id": "real-d22f2593-q-0219",
+      "answer_requirements": [],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:5f275141-cc24-4de7-90f9-aec55918b586:0:message",
       "as_of_sequence": 219,
       "query_type": "cross_context",
@@ -3071,6 +3086,10 @@
     },
     {
       "sample_id": "real-d22f2593-q-0331",
+      "answer_requirements": [
+        "确认修改方向为「外轮廓全虚线、薄壳全实线」，并调「椭圆透视比例」「圆柱压到 3:1」",
+        "指出「Visio 在我生成之后又把旧文档存回去覆盖了新文件」，并「清干净、重来」"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:b352e528-75e3-43d2-b218-9104f0e2b38c:0:message",
       "as_of_sequence": 331,
       "query_type": "short_coreference",
@@ -3096,6 +3115,11 @@
     },
     {
       "sample_id": "real-d22f2593-q-0576",
+      "answer_requirements": [
+        "先承认「我搞错了方向，不猜第二遍了」，请用户指明偏差",
+        "列出底部四样东西，包括「白色内孔椭圆（r）」「灰渐变外圈环（r+δr）」",
+        "给出「方案 A」与「方案 B」两种底部处理方式供用户选择"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:6b46c697-ea18-4100-8671-fee0f32d7a29:0:message",
       "as_of_sequence": 576,
       "query_type": "continue",
@@ -3121,6 +3145,11 @@
     },
     {
       "sample_id": "real-d22f2593-q-0801",
+      "answer_requirements": [
+        "指出是「T1_reference_check.py」和「T1_reference_refine.py」两份，按顺序跑",
+        "说明第二遍「必须在此之后跑」，温度用「圆柱 Robin 边界的特征函数展开」",
+        "产出「T1_reference_result.npz」「T1_comparison.json」「T1_答案核对.md」"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:cf1deb42-32d6-437e-be85-f83cd5b62513:0:message",
       "as_of_sequence": 801,
       "query_type": "cross_context",
@@ -3147,6 +3176,11 @@
     },
     {
       "sample_id": "real-d22f2593-q-0868",
+      "answer_requirements": [
+        "指出 Codex 最后一轮审核针对的是「最初的 T1.py」，从未评价当前「T1（温度和水分）.py」",
+        "给出量化对照，如用户显式水分全域「1132 / 37800」、论文表「2 / 35」",
+        "解释争议格：两边同显「2.2471」，参考值卡在「2.24705」分界线上"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:f61208f9-1de4-4b2f-aaa5-e19e75288e06:0:message",
       "as_of_sequence": 868,
       "query_type": "switch",
@@ -3172,6 +3206,11 @@
     },
     {
       "sample_id": "real-d22f2593-q-0977",
+      "answer_requirements": [
+        "给出短答「能，但代价不成比例，而且这是个伪目标」",
+        "指出要把期望翻转格数压到 0.1 以下需「N=40000」量级",
+        "建议「停在 N=4000 / dt=0.02」"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:ad6740f6-c58d-41bf-b1a6-57d191a336ed:0:message",
       "as_of_sequence": 977,
       "query_type": "return",
@@ -3197,6 +3236,11 @@
     },
     {
       "sample_id": "real-d22f2593-q-1216",
+      "answer_requirements": [
+        "给出 (50 ℃, 0.05) 下结果「57.471895 h」，较基线「+1090.46 s = +18.2 分钟」",
+        "指出该假设影响比数值误差「大 12,000 倍」",
+        "建议论文报「区间」而不是「四位小数」"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:75523851-646c-420f-b8ec-8f1e82b64cbe:0:message",
       "as_of_sequence": 1216,
       "query_type": "switch",
@@ -3222,6 +3266,11 @@
     },
     {
       "sample_id": "real-d22f2593-q-1269",
+      "answer_requirements": [
+        "分口径：「论文表」70 个数「0 / 35 完全一致」，全表还剩「30 格」差最后一位",
+        "指出那 30 格是「刀口格」，参考值距分界 1e-9~1e-7",
+        "建议「不要」为消掉再加密约 10 倍网格（「N≈40000」）"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:e1d61bd6-3523-4ff0-8e9b-24a66f6535e4:0:message",
       "as_of_sequence": 1269,
       "query_type": "return",
@@ -3247,6 +3296,11 @@
     },
     {
       "sample_id": "real-d22f2593-q-1426",
+      "answer_requirements": [
+        "独立验证确认 Codex 结论成立，给出「R* = 1.2112 cm」「t ≈ 19.40 h」等不相容证据",
+        "回答题目条件「不多余」：附件2 规定外边界，「ρ(C)」是热物性而非几何",
+        "指出关键结构性发现「内部运动规律对 τ₄ 完全无影响」"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:c7e0ba69-4f71-4b83-9ece-45f2f23de02f:0:message",
       "as_of_sequence": 1426,
       "query_type": "cross_context",
@@ -3273,6 +3327,9 @@
     },
     {
       "sample_id": "real-d22f2593-q-1760",
+      "answer_requirements": [
+        "指出线性外推斜率「+7.84e-07 ℃/s」会「超出观测范围 [49.757, 50.246]」"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:23f007aa-6dfd-4c0b-bf61-7929766ae421:0:message",
       "as_of_sequence": 1760,
       "query_type": "return",
@@ -3298,6 +3355,10 @@
     },
     {
       "sample_id": "real-d22f2593-q-1841",
+      "answer_requirements": [
+        "说明在「第四题灵敏度分析/」里做附录4固定半径对照",
+        "指出先查看 Codex 非均匀对照代码的接口"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:c83627bd-7d5d-4095-aef9-a2de81e6c4c7:0:message",
       "as_of_sequence": 1841,
       "query_type": "short_coreference",
@@ -3323,6 +3384,11 @@
     },
     {
       "sample_id": "real-d22f2593-q-1892",
+      "answer_requirements": [
+        "引用题面依据：问题2 的「恒温干燥」阶段、附录1 的「烘干初期」定位",
+        "给出平台实测统计「50.004945 ℃」「0.0499937」及标准误「0.0162 ℃」（「0.30 倍标准误」）",
+        "逐条说明其他方案不合理：末值「1.03σ」噪声抽样、外推「超出附件 1 恒温段的全部观测范围」、随机扰动「不可复现」"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:b5c4eabd-a4df-48db-ab5e-dc7841ee571d:0:message",
       "as_of_sequence": 1892,
       "query_type": "return",
@@ -3348,6 +3414,11 @@
     },
     {
       "sample_id": "real-d22f2593-q-1897",
+      "answer_requirements": [
+        "给出倾向：「更倾向 50 / 0.05」，核心是「只差 0.30 倍标准误」",
+        "指出「恒温」暗示「设定值」，「设定值通常取整数」",
+        "说明两选择对 τ₃ 影响约「几十秒」，远小于「1090 秒」"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:95487b0f-ae2a-4cbe-9c4c-8da93696baa2:0:message",
       "as_of_sequence": 1897,
       "query_type": "return",
@@ -3373,6 +3444,11 @@
     },
     {
       "sample_id": "real-d22f2593-q-1910",
+      "answer_requirements": [
+        "纠正说反部分：「从头到尾一次都没变过」，不是每步重建空间网格",
+        "指出 R(t) 只从少数出口进入：体积乘「(R/R_0)^2」、两个「表面通量」乘 R",
+        "指出只有「输出时」才需要换算，域外「填 NaN」"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:e4f50ed7-ea37-4681-ab8b-539a82884850:0:message",
       "as_of_sequence": 1910,
       "query_type": "cross_context",
@@ -3399,6 +3475,11 @@
     },
     {
       "sample_id": "real-d22f2593-q-1944",
+      "answer_requirements": [
+        "指出温度用「圆柱 Robin 特征函数展开（解析解）」验证，给出「λJ₁(λ)=Bi·J₀(λ)」",
+        "指出水分用「守恒有限体积 + BDF/Radau 隐式积分」验证，空间加密到「N = 1600 → 3200 → 6400 → 12800」",
+        "说明「T1_step_check.py」的显式 Heun 只是对照方法，「不是验证基准」"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:5aa38b3f-d0b5-4942-8323-3648bc96afa1:0:message",
       "as_of_sequence": 1944,
       "query_type": "return",
@@ -3424,6 +3505,10 @@
     },
     {
       "sample_id": "real-d22f2593-q-1998",
+      "answer_requirements": [
+        "指出 result2.npz 的 final_state 是「交错存储」（fs[0::2]=温度）",
+        "指出 3 h 即「10800 s」，是 Q2 终点，可取「全域光滑剖面」"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:090bbcb0-4909-4b4e-a4b7-7ed73899ad62:0:message",
       "as_of_sequence": 1998,
       "query_type": "switch",
@@ -3449,6 +3534,10 @@
     },
     {
       "sample_id": "real-d22f2593-q-2157",
+      "answer_requirements": [
+        "盘点既有数据不足：N=400/800「只剩四位小数 Excel」、各档「dt 不统一」、耗时重复性差",
+        "用未修改的 T2_CN.py 补跑干净 2 倍序列「N = 500 → 1000 → 2000 → 4000 → 8000 → 16000」"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:71858cb9-6792-482e-bb8d-e59749a1fdfa:0:message",
       "as_of_sequence": 2157,
       "query_type": "switch",
@@ -3474,6 +3563,7 @@
     },
     {
       "sample_id": "real-d22f2593-q-2450",
+      "answer_requirements": [],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:3c27a271-52aa-4937-ad6a-ae017827e571:0:message",
       "as_of_sequence": 2450,
       "query_type": "cross_context",
@@ -3500,6 +3590,11 @@
     },
     {
       "sample_id": "real-d22f2593-q-1227",
+      "answer_requirements": [
+        "给出结论「PINN 最不划算的场景之一」",
+        "对比误差量级：PINN 典型「1e-3~1e-4」 vs 现有「2.70e-07 ℃」",
+        "指出不利结构：边界层「只有半径的 0.35%」、强指数非线性导致「刚性」"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:2a30010f-65d7-4789-96e1-3e0f5cc77389:0:message",
       "as_of_sequence": 1227,
       "query_type": "new_context",
@@ -3518,6 +3613,11 @@
     },
     {
       "sample_id": "real-d22f2593-q-1370",
+      "answer_requirements": [
+        "先查竞赛 AI 使用规定，指出违规后果「取消其评奖资格」、需附「AI工具使用详情.pdf」",
+        "给出 COMSOL 结论「不要用它出正式结果」",
+        "指出 COMSOL 有价值用途如「端面影响的二维检验」、变形几何（ALE）验证运动假设"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:1eb44be4-bac4-4b87-9400-ea7e16cc7332:0:message",
       "as_of_sequence": 1370,
       "query_type": "new_context",
@@ -3536,6 +3636,11 @@
     },
     {
       "sample_id": "real-d22f2593-q-2511",
+      "answer_requirements": [
+        "从聊天记录确认模型名：Codex 侧「gpt-6-astra」、终端侧「deepseek-v4.1-flash」",
+        "用 LaTeX 生成规定要求的「AI工具使用详情.pdf」",
+        "说明隐私处理「不含」用户名、文件路径、会话 ID；提醒自行核对 DeepSeek 网页版条目"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:7f2f0da2-7ecd-4d15-88a4-a36d239d7200:0:message",
       "as_of_sequence": 2511,
       "query_type": "switch",
@@ -3561,6 +3666,11 @@
     },
     {
       "sample_id": "real-d22f2593-q-2572",
+      "answer_requirements": [
+        "将全文「参赛队」改为「我们」",
+        "找到最早代码「T1（温度和水分）.py」是显式 Heun（dt=0.002 s）",
+        "新增格式演进：显式误差约为 CN 的「8 至 14 倍」，时间步长约「两个数量级」"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:72bc13e3-2a0b-4445-990f-d876a035d22f:0:message",
       "as_of_sequence": 2572,
       "query_type": "cross_context",
@@ -3587,6 +3697,11 @@
     },
     {
       "sample_id": "real-d22f2593-q-3070",
+      "answer_requirements": [
+        "给出结论「没有泄露你的个人信息」",
+        "说明附件中的署名来自题目原包且「md5 与竞赛原包完全一致」，建议不要改",
+        "说明那个数字只是行标识符/时间列，属「虚惊一场」"
+      ],
       "query_event_id": "claude:d22f2593-21d1-4c36-8156-737656f86e98:4146d3fc-5db3-40b2-bde4-e996ee345ab9:0:message",
       "as_of_sequence": 3070,
       "query_type": "return",

@@ -81,7 +81,9 @@ results.
 ## Next step, in order
 
 1. ~~Write `answer_requirements` for the 26 real checkpoints~~ — **done, and they discriminate.**
-   65 requirements over 24 checkpoints (two have none: their reference turn was interrupted
+   The labels live on the checkpoints in `datasets/real-replay/claude-d22f2593.json`, behind the
+   same PII gate the export path uses; 65 requirements over 24 checkpoints (two have none: their
+   reference turn was interrupted
    before any prose existed, so correct behaviour there is `must_abstain`, not a requirement
    string). Each checkpoint's requirements score **1.000 against their own answer**, and
    against all 552 other-answer pairs the mean is **0.0088** with 541 pairs at exactly 0.00,
