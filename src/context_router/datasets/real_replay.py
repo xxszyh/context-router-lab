@@ -88,13 +88,28 @@ def scrub(text: str) -> str:
     return text
 
 
+def _mask(value: str) -> str:
+    """Describe a match without reproducing it. A gate that logs the leak is part of the leak."""
+
+    return f"{value[:2]}…({len(value)} chars)"
+
+
 def assert_clean(text: str, *, where: str) -> None:
-    """Fail loudly if anything publishable is still present."""
+    """Fail loudly if anything publishable is still present.
+
+    The offending value is masked rather than echoed: this runs in CI and in transcripts, and
+    printing the phone number it just found would put it somewhere new.
+
+    Callers must pass the fields that were actually redacted, not a document that also carries
+    importer-generated identifiers. A UUID's hex groups are runs of digits, so a phone pattern
+    matches them, and checking identifiers turns a real guard into a false alarm -- which is
+    exactly what happened on the first export.
+    """
 
     for label, pattern in _FORBIDDEN:
         match = pattern.search(text)
         if match:
-            raise ScrubError(f"{label} survived scrubbing in {where}: {match.group(0)[:40]!r}")
+            raise ScrubError(f"{label} survived scrubbing in {where}: {_mask(match.group(0))}")
 
 
 class AnnotatedCheckpoint(Contract):
@@ -157,12 +172,30 @@ class ExportReport:
     directory: Path
 
 
+def _scrub_value(value: Any) -> Any:
+    """Redact a parsed payload's strings, leaving its structure alone.
+
+    Scrubbing the *serialised* payload instead is wrong, and not subtly: a JSON string holds
+    `C:\\\\Users\\\\x`, so a pattern matching `C:\\` consumes one backslash of an escaped pair and
+    leaves `\\x` behind, which is not a legal escape. Real events carry paths in their payload,
+    so the export produced invalid JSON on the first real run while the unit tests, whose
+    payloads had no paths, stayed green.
+    """
+
+    if isinstance(value, str):
+        return scrub(value)
+    if isinstance(value, dict):
+        return {key: _scrub_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_scrub_value(item) for item in value]
+    return value
+
+
 def _scrub_event(event: RawEvent) -> tuple[RawEvent, bool]:
     """Rebuild an event with its content and payload redacted."""
 
     content = scrub(event.content)
-    raw_payload = json.dumps(event.payload, ensure_ascii=False)
-    payload: dict[str, Any] = json.loads(scrub(raw_payload))
+    payload: dict[str, Any] = _scrub_value(event.payload)
     # `create` recomputes `content_sha256`, which the contract requires to match the content.
     return (
         RawEvent.create(
@@ -222,6 +255,17 @@ def export_sanitized(
         if event.event_id in members.get(context.context_id, set())
     ]
 
+    # Check the redacted fields, not the whole document: identifiers are importer-generated
+    # UUIDs and are deliberately not redacted, so scanning them only produces false alarms.
+    for event in events:
+        where = f"{destination}/sanitized.json:{event.event_id}"
+        assert_clean(event.content, where=where)
+        assert_clean(json.dumps(event.payload, ensure_ascii=False), where=where)
+    for context in contexts:
+        assert_clean(context.model_dump_json(), where=f"{destination}/sanitized.json")
+    for item in assignments:
+        assert_clean(item.model_dump_json(), where=f"{destination}/sanitized.json")
+
     blob = json.dumps(
         {
             "events": [event.model_dump(mode="json") for event in events],
@@ -230,7 +274,6 @@ def export_sanitized(
         },
         ensure_ascii=False,
     )
-    assert_clean(blob, where=str(destination))
     (destination / "sanitized.json").write_text(blob + "\n", encoding="utf-8")
 
     query_rows = [
@@ -238,8 +281,13 @@ def export_sanitized(
         for annotation in annotations
         for checkpoint in annotation.checkpoints
     ]
+    # `notes` is the only free text here; the rest is ids and labels.
+    for checkpoint in (c for a in annotations for c in a.checkpoints):
+        assert_clean(
+            checkpoint.notes,
+            where=f"{destination}/benchmark.jsonl:{checkpoint.sample_id}",
+        )
     queries_blob = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in query_rows)
-    assert_clean(queries_blob, where=str(destination / "benchmark.jsonl"))
     (destination / "benchmark.jsonl").write_text(queries_blob, encoding="utf-8")
 
     return ExportReport(

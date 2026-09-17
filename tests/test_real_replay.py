@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -222,3 +223,59 @@ def test_a_real_drive_path_is_still_caught_and_scrubbed() -> None:
     assert scrub(r"D:/data/input.csv").startswith("<abs>/")
     with pytest.raises(ScrubError, match="drive-path"):
         assert_clean(r"open D:/data/input.csv", where="test")
+
+
+def test_a_path_inside_the_payload_is_scrubbed_without_breaking_the_json() -> None:
+    r"""Redaction must run on parsed values, not on serialised JSON.
+
+    A JSON string holds `C:\\Users\\x`, so a pattern that eats `C:\` consumes one backslash of
+    an escaped pair and leaves `\x`, which is not a legal escape. The first real export died
+    on exactly this, because the fixture payloads had no paths in them.
+    """
+
+    from datetime import UTC, datetime
+
+    from context_router.datasets.real_replay import _scrub_event
+
+    original = RawEvent.create(
+        event_id="evt-9",
+        session_id="real-1",
+        sequence=9,
+        occurred_at=datetime(2026, 9, 1, 9, tzinfo=UTC),
+        ingested_at=datetime(2026, 9, 1, 9, tzinfo=UTC),
+        actor="tool",
+        kind="tool_call",
+        content="read the file",
+        payload={"source_file": HOME, "nested": {"list": [HOME, "keep p3.py"]}},
+    )
+
+    cleaned, changed = _scrub_event(original)
+
+    assert changed is True
+    assert "somebody" not in json.dumps(cleaned.payload)
+    assert "p3.py" in json.dumps(cleaned.payload), "the task identifier survives"
+    # The round trip is the assertion that matters: this is what raised on real data.
+    assert json.loads(cleaned.model_dump_json())["payload"]["source_file"].startswith("<home>")
+
+
+def test_a_uuids_digit_run_is_not_reported_as_a_phone_number() -> None:
+    """Importer-generated ids are not redacted, so scanning them only raises false alarms.
+
+    A UUID hex group can be eleven digits starting with 1, which is exactly a mainland mobile
+    number's shape. The first real export failed on one, and the guard's own message then
+    printed the digits -- a gate that logs the leak is part of the leak.
+    """
+
+    uuid_like = "claude:d22f2593-21d1-4c36-8156-737656f86e98:187208235433:0:message"
+
+    assert_clean(uuid_like, where="identifier")  # must not raise
+
+
+def test_the_guard_does_not_echo_what_it_caught() -> None:
+    secret_value = "sk-" + "a" * 24
+
+    with pytest.raises(ScrubError) as excinfo:
+        assert_clean(f"token {secret_value}", where="test")
+
+    assert secret_value not in str(excinfo.value)
+    assert "chars)" in str(excinfo.value), "report the shape, not the value"
