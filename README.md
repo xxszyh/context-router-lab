@@ -136,11 +136,12 @@ router on its default configuration.
 | Oracle token reduction vs full history | **85.2%** (target >= 30%) |
 | Oracle evidence recall vs full history | not worse (1.000 vs 1.000) |
 | Future-event leakage, all arms | 0 |
-| Answer quality | **not yet measured** |
+| Answer quality | exploratory direction only; formal non-inferiority unverified |
 | Verdict | **continue** |
 
-The gate is deliberately answerable offline. Its answer-quality criterion needs a run
-against a pinned main model and is reported as unverified rather than assumed.
+The offline part of the gate passes. A small private-model run later supported the direction
+of the evidence-recall result, but its model alias and judge were not reproducible, so formal
+answer-quality non-inferiority remains unverified rather than assumed.
 
 **Read the table before trusting it.** Two things in it matter more than the ranking:
 
@@ -188,6 +189,11 @@ Gate two is **not** passed. On the dev split the tuned policy reaches a high-con
 error rate of 0.013 (target ≤ 0.02) and cross-context recall of 0.958 (target ≥ 0.90), but
 required-context recall of 0.840 against a target of 0.95.
 
+That 0.840 and the later 1.000 stage diagnostic measure different operating points. The
+default policy keeps every required context but over-selects heavily; the tuned development
+policy narrows the set and loses required contexts. The problem to solve is therefore the
+recall–precision calibration trade-off, not an unexplained contradiction between runs.
+
 ```bash
 ctxlab generate-synthetic run/train --sessions 36 --session-start 0
 ctxlab generate-synthetic run/dev   --sessions 12 --session-start 36
@@ -196,10 +202,25 @@ ctxlab generate-synthetic run/test  --sessions 12 --session-start 48
 # and finally compare-baselines on test with --ranker-file and --policy-file
 ```
 
-The router reaches full evidence recall at within 1% of BM25's token cost, and unlike
-BM25 it also produces selected contexts, relation labels, an abstention decision and a
-per-turn routing trace. On this dataset, that is the honest state of the claim: equal
-recall and equal cost, plus structure — not a token saving.
+The default router reaches full evidence recall at 4.8% below BM25's token cost; training and
+policy tuning widen that held-out reduction to 14.4%. It also produces selected contexts,
+relation labels, an abstention decision and a per-turn routing trace. These are synthetic
+results, so the next milestone is real causal replay rather than another synthetic claim.
+
+### Stage diagnosis: retrieval is not the present synthetic bottleneck
+
+The new stage metrics separate a required context that never entered the candidate set from
+one that entered and was later dropped. On the same 780 checkpoints, both candidate and
+selected required-context recall are 1.000, with zero candidate misses and zero selection
+losses. The problem is the other direction: selection precision is 0.591, 280 cases select
+too broadly and the router includes 540 excess contexts. `new_context`, `unanswerable` and
+`cross_context` account for most of them.
+
+That result changes the implementation order. A Transformer is not justified here as a
+synthetic recall fix; a pinned semantic embedding remains a conditional real-replay ablation.
+The current priority is a sanitized, manually labelled replay of real Claude histories, then
+calibration and narrower soft selection where those labels support it. See
+[`docs/v0.2-real-replay.md`](docs/v0.2-real-replay.md).
 
 ### What the first measurement got wrong
 
@@ -313,7 +334,8 @@ Implemented: append-only SQLite event store with causal replay and lossless JSON
 round-trip, bilingual and code-aware lexical analysis, BM25 and hashing-vector retrieval
 fused by RRF, rule-based relation classification, a pluggable Platt-calibrated ranker,
 soft-routing policy tuning, a token-budgeted context builder with provenance spans and
-tool-call atomic groups, the nine comparison arms, leakage-aware metrics, and a CLI.
+tool-call atomic groups, the nine comparison arms, leakage-aware stage metrics, local Claude
+Code transcript import, and a CLI.
 
 Deliberately **not** implemented yet, because gate one only licenses them if it passes:
 memory writer, automatic context creation, merge/split, context hierarchy or graph, and
@@ -411,7 +433,7 @@ Apache-2.0. See [LICENSE](LICENSE).
 
 1. **省 token 不等于做对了。** 三个最便宜的臂省掉 89–95% 的 memory token，却只召回
    46–54% 的标注证据。只看 token 降幅的结论在这里没有价值。
-2. **Oracle 以很大余量证明架构成立**：省 79.7% 且证据召回一条不丢，第一道门槛通过。
+2. **Oracle 以很大余量证明架构成立**：省 85.2% 且证据召回一条不丢，第一道门槛通过。
 
 **Router 曾经被最朴素的 BM25 全面压过**（召回 0.744 vs 1.000，token 还更多）。那 0.744
 是真的，但从它得出的结论是错的。逐层诊断后定位到**七个**缺陷：**(1)** 关系规则太窄；
@@ -432,4 +454,5 @@ episode**，换任何系统都检索不到）；**(7)** Builder 把 token 预算
 0.840 < 0.95。
 
 另外 `global_dense`(0.949) 与 `global_hybrid`(0.974) 仍**低于** `global_bm25`(1.000)，
-这是默认哈希嵌入器不含语义的直接证据。答案质量尚未测量——必须先固定主模型才能下结论。
+这是默认哈希嵌入器不含语义的直接证据。答案质量做过小规模探索性测量，方向上支持证据
+召回，但模型别名、Judge 和样本量都不足以给出可信幅度；必须用固定、可复现的模型重跑。

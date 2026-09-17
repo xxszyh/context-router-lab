@@ -45,11 +45,21 @@ def test_cli_generates_ingests_validates_and_benchmarks_dataset(tmp_path: Path) 
     results = json.loads(output.read_text(encoding="utf-8"))
     assert results["metrics"]["count"] == queries_per_session() * 2
     assert "micro_recall" in results["metrics"]
+    stages = results["metrics"]["stage_diagnostics"]
+    assert stages["candidate_micro_recall"] >= stages["selection_micro_recall"]
+    assert "continue" in stages["by_query_type"]
+    assert "cross_context" in stages["by_query_type"]
+    assert results["traces"][0]["query_type"]
 
     report = tmp_path / "report.md"
     reported = runner.invoke(app, ["report", str(output), str(report)])
     assert reported.exit_code == 0, reported.output
-    assert "Context Router Benchmark" in report.read_text(encoding="utf-8")
+    report_text = report.read_text(encoding="utf-8")
+    assert "Context Router Benchmark" in report_text
+    assert "Candidate required-context recall" in report_text
+    assert "Selection losses" in report_text
+    assert "Excess selected contexts" in report_text
+    assert "| `continue` |" in report_text
 
 
 def test_judge_answers_applies_the_double_refusal_gate_by_default(tmp_path: Path) -> None:

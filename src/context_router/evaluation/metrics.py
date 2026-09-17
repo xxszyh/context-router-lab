@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import random
+from collections import defaultdict
 from statistics import mean
 from typing import Literal
 
@@ -20,6 +21,7 @@ class RouteCaseResult(Contract):
     confidence: float = Field(ge=0.0, le=1.0)
     relation_expected: Relation
     relation_predicted: Relation
+    query_type: str = "unknown"
 
 
 def _safe_div(numerator: float, denominator: float) -> float:
@@ -36,6 +38,76 @@ def _ndcg(required: set[str], ranking: list[str]) -> float:
     )
     ideal = sum(1.0 / math.log2(index + 2) for index in range(len(required)))
     return _safe_div(dcg, ideal)
+
+
+def _stage_group(cases: list[RouteCaseResult]) -> dict[str, int | float | None]:
+    answerable = [case for case in cases if case.required_context_ids]
+    candidate_total = sum(len(set(case.candidate_order)) for case in cases)
+    selected_total = sum(len(set(case.selected_context_ids)) for case in cases)
+    selection_extras = sum(
+        len(set(case.selected_context_ids) - set(case.required_context_ids)) for case in cases
+    )
+    over_selected_cases = sum(
+        bool(set(case.selected_context_ids) - set(case.required_context_ids)) for case in cases
+    )
+    required_total = 0
+    candidate_hits = 0
+    selection_hits = 0
+    selection_hits_from_candidates = 0
+    candidate_complete = 0
+    selection_complete = 0
+    candidate_misses = 0
+    selection_losses = 0
+    for case in answerable:
+        required = set(case.required_context_ids)
+        candidates = set(case.candidate_order)
+        selected = set(case.selected_context_ids)
+        required_total += len(required)
+        candidate_required = required & candidates
+        selected_required = required & selected
+        candidate_hits += len(candidate_required)
+        selection_hits += len(selected_required)
+        selection_hits_from_candidates += len(candidate_required & selected)
+        candidate_misses += len(required - candidates)
+        selection_losses += len(candidate_required - selected)
+        candidate_complete += int(required <= candidates)
+        selection_complete += int(required <= selected)
+    return {
+        "cases": len(cases),
+        "cases_with_required_context": len(answerable),
+        "required_contexts": required_total,
+        "candidate_hits": candidate_hits,
+        "selection_hits": selection_hits,
+        "candidate_miss_count": candidate_misses,
+        "selection_loss_count": selection_losses,
+        "selection_extra_count": selection_extras,
+        "over_selected_case_count": over_selected_cases,
+        "mean_candidate_contexts": candidate_total / len(cases) if cases else None,
+        "mean_selected_contexts": selected_total / len(cases) if cases else None,
+        "candidate_micro_recall": (candidate_hits / required_total if required_total else None),
+        "selection_micro_recall": (selection_hits / required_total if required_total else None),
+        "selection_micro_precision": (selection_hits / selected_total if selected_total else None),
+        "selection_given_candidate_recall": (
+            selection_hits_from_candidates / candidate_hits if candidate_hits else None
+        ),
+        "candidate_complete_rate": (candidate_complete / len(answerable) if answerable else None),
+        "selection_complete_rate": (selection_complete / len(answerable) if answerable else None),
+    }
+
+
+def _stage_diagnostics(cases: list[RouteCaseResult]) -> dict[str, object]:
+    by_query_type: dict[str, list[RouteCaseResult]] = defaultdict(list)
+    by_relation: dict[str, list[RouteCaseResult]] = defaultdict(list)
+    for case in cases:
+        by_query_type[case.query_type].append(case)
+        by_relation[case.relation_expected].append(case)
+    return {
+        **_stage_group(cases),
+        "by_query_type": {
+            name: _stage_group(group) for name, group in sorted(by_query_type.items())
+        },
+        "by_relation": {name: _stage_group(group) for name, group in sorted(by_relation.items())},
+    }
 
 
 def evaluate_routes(cases: list[RouteCaseResult]) -> dict[str, object]:
@@ -105,6 +177,7 @@ def evaluate_routes(cases: list[RouteCaseResult]) -> dict[str, object]:
         "ece": ece,
         "high_confidence_error_rate": 1.0 - mean(high_confidence) if high_confidence else 0.0,
         "risk_coverage": _risk_coverage(cases, correctness),
+        "stage_diagnostics": _stage_diagnostics(cases),
     }
 
 
