@@ -493,7 +493,7 @@ def annotate_necessity_command(
     model: Annotated[str | None, typer.Option(help="Pinned model id")] = None,
     base_url: Annotated[str | None, typer.Option()] = None,
     auth_style: Annotated[str, typer.Option(help="bearer or x-api-key")] = "bearer",
-    max_tokens: Annotated[int, typer.Option(min=16)] = 16,
+    max_tokens: Annotated[int, typer.Option(min=64)] = 512,
     limit: Annotated[int, typer.Option(min=1, help="Checkpoints to process")] = 26,
     per_context: Annotated[int, typer.Option(min=1, help="Events per context")] = 6,
 ) -> None:
@@ -532,6 +532,7 @@ def annotate_necessity_command(
 
     rows: list[dict[str, Any]] = []
     totals = {"calls": 0, "unreadable": 0, "control_failures": 0}
+    unreadable_replies: list[str] = []
     started = time.time()
     for index, checkpoint in enumerate(annotation.checkpoints[:limit], start=1):
         seq = checkpoint.as_of_sequence
@@ -578,6 +579,7 @@ def annotate_necessity_command(
         failed_controls = control_failures(run.verdicts)
         totals["calls"] += len(materials)
         totals["unreadable"] += run.unreadable
+        unreadable_replies.extend(run.unreadable_replies)
         totals["control_failures"] += len(failed_controls)
         agrees = derived == sorted(checkpoint.required_context_ids)
         rows.append(
@@ -608,6 +610,7 @@ def annotate_necessity_command(
             "checkpoints": len(rows),
             "calls": totals["calls"],
             "unreadable": totals["unreadable"],
+            "unreadable_replies": unreadable_replies[:20],
             "control_failures": totals["control_failures"],
             "exact_set_agreement": agreed / len(rows) if rows else 0.0,
             "seconds": round(time.time() - started, 1),

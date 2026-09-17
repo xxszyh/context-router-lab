@@ -316,3 +316,25 @@ def test_a_same_annotator_recheck_does_not_count_as_double_annotation() -> None:
     assert coverage.recheck_type_agreement == 0.0
     assert coverage.double_annotated == 0, "a recheck is not an independent annotator"
     assert coverage.double_rate == 0.0
+
+
+def test_validate_rejects_a_required_context_that_does_not_exist_yet(
+    store: SQLiteEventStore,
+) -> None:
+    """Declared is not the same as visible.
+
+    The first real checkpoint required `ctx-t1-algo` while that context's own first event was
+    the checkpoint itself, so none of its material was in scope. The declaration check passed
+    it; only the ablation exposed it.
+    """
+
+    early = annotation(required=["ctx-ice"]).model_copy(
+        update={
+            "checkpoints": [annotation().checkpoints[0].model_copy(update={"as_of_sequence": 0})]
+        }
+    )
+
+    report = validate_real_replay(store, [early], enforce_double_annotation=False)
+
+    assert report.valid is False
+    assert any("no visible material" in error for error in report.errors), report.errors

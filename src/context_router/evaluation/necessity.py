@@ -25,7 +25,7 @@ the router would actually have shown.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 from context_router.assembly.builder import TokenCounter
@@ -140,6 +140,9 @@ class AblationRun:
     unreadable: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    #: Text of replies that could not be read. Without it a run of 117 unreadable replies
+    #: reports a number and no way to find out why, which is what happened.
+    unreadable_replies: list[str] = field(default_factory=list)
 
 
 def run_ablations(
@@ -170,6 +173,7 @@ def run_ablations(
         answerable = parse_verdict(result.text)
         if answerable is None:
             run.unreadable += 1
+            run.unreadable_replies.append(result.text[:200])
             continue
         run.verdicts.append(
             AblationVerdict(

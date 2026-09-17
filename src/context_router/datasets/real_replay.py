@@ -415,6 +415,27 @@ def validate_real_replay(
             missing = set(checkpoint.required_context_ids) - known_contexts
             if missing:
                 errors.append(f"undeclared contexts in {checkpoint.sample_id}: {sorted(missing)}")
+            # A context can be declared and still not exist yet at this checkpoint. The first
+            # real checkpoint required `ctx-t1-algo` while its own first event *was* that
+            # checkpoint, so nothing of it was visible -- a label referring to the future that
+            # the declaration check alone let through.
+            for context_id in checkpoint.required_context_ids:
+                members = [
+                    by_id[event_id].sequence
+                    for event_id in annotation.context_members.get(context_id, [])
+                    if event_id in by_id
+                ]
+                # Strictly before: a context whose only event at this point *is* the checkpoint
+                # has nothing to retrieve, so requiring it asks for material that cannot exist.
+                # Testing "no member is later" instead passes that case, which is how the first
+                # real checkpoint slipped through.
+                if members and not any(
+                    sequence < checkpoint.as_of_sequence for sequence in members
+                ):
+                    errors.append(
+                        f"required context has no visible material at "
+                        f"{checkpoint.sample_id}: {context_id}"
+                    )
             if bool(checkpoint.required_context_ids) == checkpoint.must_abstain:
                 errors.append(
                     f"must_abstain conflicts with required contexts: {checkpoint.sample_id}"
@@ -428,10 +449,10 @@ def validate_real_replay(
                         errors.append(f"unknown evidence {event_id} in {checkpoint.sample_id}")
                     elif evidence.sequence > checkpoint.as_of_sequence:
                         errors.append(f"non-causal evidence {event_id} in {checkpoint.sample_id}")
-        for context_id, members in annotation.context_members.items():
+        for context_id, member_ids in annotation.context_members.items():
             if context_id not in known_contexts:
                 errors.append(f"members declared for undeclared context: {context_id}")
-            for event_id in members:
+            for event_id in member_ids:
                 if event_id not in by_id:
                     errors.append(f"unknown member {event_id} of {context_id}")
 
