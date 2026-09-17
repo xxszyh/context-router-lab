@@ -30,16 +30,17 @@ JUDGE_INSTRUCTIONS = (
     "You compare two candidate answers to the same question about a software project. You are "
     "not told how either was produced and that information is deliberately withheld: judge "
     "only what the answers say.\n\n"
-    "Procedure, in this order:\n"
-    "1. For each requirement, decide whether Answer A satisfies it, and whether Answer B "
-    "does. Work through the requirements one at a time.\n"
+    "Judge quickly. This is a comparison, not an essay, and the deliberation is not wanted:\n"
+    "1. Go through the requirements once. For each, note in one short line whether A "
+    "satisfies it and whether B does. Do not restate either answer.\n"
     "2. An answer satisfies a requirement only if it is actually addressed. Repeating a "
     "requirement's wording while saying the answer cannot be given does NOT satisfy it.\n"
     '3. Winner: "a" if A satisfies strictly more requirements; "b" if B does; "tie" only if '
     "both satisfy the same requirements and neither is more correct.\n\n"
     "The order the answers appear in carries no information, and deciding differently when "
     "they are swapped is an error.\n\n"
-    "End your reply with exactly one line and nothing after it:\n"
+    "Keep the whole reply to at most four lines, ending with exactly this and nothing after "
+    "it:\n"
     "WINNER: <a|b|tie>"
 )
 
