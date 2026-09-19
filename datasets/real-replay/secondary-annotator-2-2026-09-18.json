@@ -1,0 +1,72 @@
+{
+  "schema_version": "1.0",
+  "dataset_id": "claude-d22f2593",
+  "annotator_id": "annotator-2",
+  "annotator_type": "human",
+  "annotated_at": "2026-09-18",
+  "independence": "user_reported",
+  "source_file_name": "context-router-second-annotator-blind.xlsx",
+  "source_workbook_sha256": "16a22eec59f25e104c2ffbf571a9b0269da1b2f331d3e2c4d1c23a4eff1f2d7f",
+  "selection_seed": "context-router-second-annotator-v1",
+  "provenance_note": "The user identified this as a second annotator's blinded worksheet and confirmed on 2026-09-18 that annotator-2 is human. Independence remains user-reported because it is established by the blinded workflow and user statement rather than workbook metadata.",
+  "records": [
+    {
+      "blind_id": "B01",
+      "sample_id": "real-d22f2593-q-0157",
+      "answer_status": "answerable",
+      "answer_requirements": [
+        "「四位小数差多少 **差很多——35 格里 15 格四位小数对不上**」",
+        "「而且全部集中在 1.0 cm 以外的区域」"
+      ],
+      "notes": ""
+    },
+    {
+      "blind_id": "B02",
+      "sample_id": "real-d22f2593-q-1944",
+      "answer_status": "answerable",
+      "answer_requirements": [
+        "「第一题用了三类「其他算法」验证 ## 核心：温度走**解析解**，水分走**另一个数值求解器** 」",
+        "「*守恒有限体积 + BDF/Radau 隐式积分**」",
+        "「**显式 Heun（预测—校正）**」"
+      ],
+      "notes": ""
+    },
+    {
+      "blind_id": "B03",
+      "sample_id": "real-d22f2593-q-1998",
+      "answer_status": "answerable",
+      "answer_requirements": [
+        "「数据和字体都齐了。Q2 的 `result2.npz` 里 `final_state` 是交错存储（`fs[0::2]`=温度、`fs[1::2]`=含水率，N=4000 共 4001 节点），3 h 正好是 Q2 的终点 10800 s，可以直接取到全域光滑剖面」"
+      ],
+      "notes": ""
+    },
+    {
+      "blind_id": "B04",
+      "sample_id": "real-d22f2593-q-2450",
+      "answer_status": "no_substantive_answer",
+      "answer_requirements": [],
+      "notes": ""
+    },
+    {
+      "blind_id": "B05",
+      "sample_id": "real-d22f2593-q-0107",
+      "answer_status": "answerable",
+      "answer_requirements": [
+        "「这个文件我逐行对着 Codex 指出的问题核了一遍，另外跑了数值对比。先看代码本身：\n数值对比出来了，差异不小」",
+        "「守恒测试的权重有笔误，我重做并加一个独立的高精度参照解（BDF 时间积分）来判断谁收敛到真解」"
+      ],
+      "notes": ""
+    },
+    {
+      "blind_id": "B06",
+      "sample_id": "real-d22f2593-q-0193",
+      "answer_status": "answerable",
+      "answer_requirements": [
+        "「所以确实是我没跟上，抱歉。 现在跑你保存后的版本」",
+        "「守恒那行是我把粗细两套权重混用了，重算」",
+        "「所以 dt 确实不用动。」"
+      ],
+      "notes": ""
+    }
+  ]
+}

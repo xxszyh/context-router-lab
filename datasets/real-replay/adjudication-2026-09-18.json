@@ -1,0 +1,74 @@
+{
+  "schema_version": "1.0",
+  "dataset_id": "claude-d22f2593",
+  "adjudicator_id": "adjudicator-unknown",
+  "adjudicator_type": "unknown",
+  "adjudicated_at": "2026-09-18",
+  "source_file_name": "context-router-answer-label-adjudication.xlsx",
+  "source_workbook_sha256": "2ce2ec443fe163ea901f1c4d3ee2007985cdef30cf6dff7c095e860b369bd945",
+  "primary_annotation_file": "datasets/real-replay/claude-d22f2593.json",
+  "secondary_annotation_file": "datasets/real-replay/secondary-annotator-2-2026-09-18.json",
+  "provenance_note": "Imported from the completed worksheet. The final-requirement columns are authoritative. The adjudicator identity/type are not present in the workbook. The workbook originally selected use_secondary for B06, but the user confirmed on 2026-09-18 that the intended decision was use_primary; the correction is recorded in B06 notes.",
+  "records": [
+    {
+      "blind_id": "B01",
+      "sample_id": "real-d22f2593-q-0157",
+      "source_decision": "use_primary",
+      "final_answer_requirements": [
+        "指出「35 格里 15 格四位小数对不上」，且集中在「1.0 cm 以外的区域」",
+        "指出必须改「第 46 行」右界面扩散系数取平均，并建议「Δr ≤ 2.5e-5」",
+        "提到「温度场根本没实现」「result1.xlsx」没写等未做项"
+      ],
+      "notes": ""
+    },
+    {
+      "blind_id": "B02",
+      "sample_id": "real-d22f2593-q-1944",
+      "source_decision": "use_primary",
+      "final_answer_requirements": [
+        "指出温度用「圆柱 Robin 特征函数展开（解析解）」验证，给出「λJ₁(λ)=Bi·J₀(λ)」",
+        "指出水分用「守恒有限体积 + BDF/Radau 隐式积分」验证，空间加密到「N = 1600 → 3200 → 6400 → 12800」",
+        "说明「T1_step_check.py」的显式 Heun 只是对照方法，「不是验证基准」"
+      ],
+      "notes": ""
+    },
+    {
+      "blind_id": "B03",
+      "sample_id": "real-d22f2593-q-1998",
+      "source_decision": "merge_rewrite",
+      "final_answer_requirements": [
+        "指出 result2.npz 的 final_state 是「交错存储」（fs[0::2]=温度）",
+        "指出 3 h 即「10800 s」，是 Q2 终点，可取「全域光滑剖面」"
+      ],
+      "notes": ""
+    },
+    {
+      "blind_id": "B04",
+      "sample_id": "real-d22f2593-q-2450",
+      "source_decision": "confirm_no_substantive_answer",
+      "final_answer_requirements": [],
+      "notes": ""
+    },
+    {
+      "blind_id": "B05",
+      "sample_id": "real-d22f2593-q-0107",
+      "source_decision": "use_primary",
+      "final_answer_requirements": [
+        "覆盖「对着 Codex 指出的问题核了一遍」并跑了「数值对比」",
+        "提到「守恒性和网格收敛」测试，以及加「独立的高精度参照解（BDF 时间积分）」"
+      ],
+      "notes": ""
+    },
+    {
+      "blind_id": "B06",
+      "sample_id": "real-d22f2593-q-0193",
+      "source_decision": "use_primary",
+      "final_answer_requirements": [
+        "承认先前跑的是「保存之前的那一版」，并给出 22:54 / 23:03 时间线",
+        "指出旧版「dr=1e-4」，新保存改动是「0.01*0.01*0.5」",
+        "重跑后「全部 35 格四位小数」与收敛值一致，即「0 / 35 不一致」"
+      ],
+      "notes": "The source workbook selected use_secondary. The user confirmed on 2026-09-18 that the intended decision was use_primary; final requirement text is unchanged."
+    }
+  ]
+}
