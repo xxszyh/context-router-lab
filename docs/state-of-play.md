@@ -61,9 +61,11 @@ contamination (8 of 9 recalled anchors were visible before the query; the ninth 
 own wording) and discrimination (off-diagonal 0.058). A free coverage-judge control on the new
 labels splits `hybrid_router` from `full_history` **9–2, 6 ties** — the separation the old set
 could not produce. The diagonal's drop from 1.000 to 0.342 is the point: the old set was scoring
-itself. *Grade: the control is exact and deterministic; it is a lexical scorer, not a verdict.
-The paid blinded judge on the new labels is the one measurement still outstanding →
-`docs/query-derived-labels-2026-09-19.md`.*
+itself. **The paid judge has now run on the new labels: the arms separate, but the direction
+favours `full_history` 5–2 with 9 ties, and at n=18 / 82% judge agreement that is a signal, not
+a conclusion. The coverage control and the paid judge now disagree on direction on real data --
+the concrete case for never reporting coverage as quality.** *Grade: exact tally; the model is
+still a private proxy alias.* → `docs/answer-gate-judge-2026-09-19.md`.*
 
 ## Not established
 
@@ -163,11 +165,12 @@ results.
    The 2026-09-18 gate failed at the floor because its requirements were written from the
    original answer. On 2026-09-19 the 20 gate checkpoints were re-labelled with the original
    reply withheld. The new 59-requirement set passes scoreability, contamination (no anchor is
-   answer-only) and discrimination (off-diagonal 0.058), and a free coverage control now
-   separates `hybrid_router` from `full_history` 9–2-6. **Outstanding: the paid blinded judge
-   on the new labels** — needs the endpoint credentials and `--model deepseek-v4.1-flash`
-   (the env `ANTHROPIC_MODEL` has the unreproducible `[1M]` suffix). Command in
-   `docs/query-derived-labels-2026-09-19.md`.
+   answer-only) and discrimination (off-diagonal 0.058). A free coverage control separates
+   `hybrid_router` from `full_history` 9–2-6; the **paid judge reverses that to 5–2 for
+   `full_history`** with 9 ties -- the arms now separate, but in the direction that does not
+   flatter routing, and still underpowered. → `docs/answer-gate-judge-2026-09-19.md`.
+   **Outstanding: re-run under a documented fixed model (the gateway exposes many), then enlarge
+   the sample with the 6 labelled-but-unrun checkpoints.**
 
 Routing gates are answered on synthetic data, where the labels are exact. Real replay answers
 the quality and cost question. That split is v0.3's main consequence.
