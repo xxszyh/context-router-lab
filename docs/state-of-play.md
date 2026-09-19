@@ -46,12 +46,22 @@ the routing gates. What it does is replace an assumption about label quality wit
 *Grade: measured against a 23-checkpoint sample; the descriptors were the wrong signal and had
 scored 21-29%.*
 
+**7. On real conversations the token cut is 221x, and full history sometimes cannot run at
+all.** 20 checkpoints: `hybrid_router` reads **1,671** memory tokens, `full_history` a median of
+**370,102** (range 53,381–836,459), input-token ratio **215x**. Two of the twenty were rejected
+by the server at `>1,048,566 tokens` for `full_history` and succeeded on all three selective
+arms — a **10% failure-to-run rate against 0%**, which no quality metric can express.
+*Grade: exact — tokens and status codes are counted. The quality half of the same run is
+underpowered and the two instruments disagree; see "Not established".*
+
 ## Not established
 
-**Answer quality, in magnitude.** The judge agrees with itself across answer order only **85%**
-as of its last run, about a third of its calls produced no readable verdict at some point, and
-half the ties are refusal checkpoints. n = 20. **Nothing here is publishable as a quality
-result.**
+**Answer quality, in magnitude.** On real conversations the judge agrees with itself across
+answer order only **82%**, decided 3 of 16 answerable pairs, and tied the rest; the lexical
+metric has no signal there at all (3.7–5.0% for every arm). The two instruments **disagree on
+direction** on real replay, having agreed on synthetic data — so that agreement was a property
+of constructed evidence and does not transfer. n = 20. **Nothing here is publishable as a
+quality result.** → `docs/real-answer-gate-2026-09-18.md`.
 
 **Anything about a documented model.** Every call-based number used `deepseek-v4.1-flash`
 through a private Anthropic-compatible proxy. The alias is not reproducible by anyone else and
@@ -74,9 +84,14 @@ benchmark is unaffected and not circular — the generator constructs the eviden
 are exact by construction and the routing gates are answered there.
 → `docs/v0.3-necessity-is-circular.md`.
 
-**No independent second annotator.** The plan's 20% double-annotation floor is the only thing
-blocking scale-up, and it is at 0%. A same-annotator recheck was run and is recorded in its own
-fields; it cannot substitute, and the attempt is evidence for why.
+**The independent-human annotation and six-checkpoint adjudication are complete.**
+All 6 rows are complete and all 13 final requirements match their reference replies. Every
+final set also exactly matches the existing primary gold label, so no gold text changed. The
+user confirmed that `annotator-2` is human and that B06's intended decision was “use primary”;
+the import records the correction without rewriting the source workbook. The blinded workflow
+is recorded as user-reported independence. Coverage is 6/26 = 23.1%, so the plan's 20%
+independent-human floor is met.
+See `docs/secondary-annotation-2026-09-18.md`.
 
 **Re-running anything call-based needs ≥1024 max_tokens.** This model's thinking block shares
 the output budget and exceeds 512 on its own. At 16 it produces empty replies that read as
@@ -110,8 +125,18 @@ results.
    micro recall 0.880 / F1 0.786 for "which contexts does the answer draw on", scoring against
    member events rather than descriptors. The context-level label for real replay exists, is
    deterministic, and costs nothing. Wired into the schema as the weaker label it is.
-3. **The answer-quality gate on real conversations** (v0.2 work package E). Same arms, one
-   pinned model, blinded pairwise judging, token cost reported. *Needs a documented model.*
+3. ~~Adjudicate the six independently labelled checkpoints~~ — **done.** Both raw sets and the
+   adjudication artifact are preserved. The human annotator and B06 correction are confirmed;
+   23.1% now counts toward and passes the independent-human coverage floor.
+4. ~~The answer-quality gate on real conversations~~ — **run, and two-sided.** On 20 real
+   checkpoints `hybrid_router` reads **1,671** memory tokens against `full_history`'s median
+   **370,102** — a **221x** cut — and `full_history` **failed to run on 2 of 20** with
+   `Input exceeds the context limit (1048566 tokens)` where all three selective arms succeeded.
+   Quality did **not** separate: the lexical metric puts every arm between 3.7% and 5.0% and
+   ranks `full_history` *last*, while the blinded judge put `full_history` ahead 3–0 with 13 of
+   16 pairs tied. **Three decisions is not a result**, and the judge's requirements are quoted
+   from the arm most likely to resemble them. → `docs/real-answer-gate-2026-09-18.md`.
+   *Still needs a documented model before any of it is publishable.*
 
 Routing gates are answered on synthetic data, where the labels are exact. Real replay answers
 the quality and cost question. That split is v0.3's main consequence.
@@ -127,9 +152,13 @@ the quality and cost question. That split is v0.3's main consequence.
 | shallow answer scorer | `evaluation/scoring.py` — `deterministic_coverage`; markdown-normalised, **never report it as answer quality on its own** |
 | real-replay format + PII gate | `datasets/real_replay.py`; labels in `datasets/real-replay/`; scrubbed export gitignored |
 | Claude history importer | `importers/claude_code.py`, CLI `ingest-claude` |
-| reports | `docs/answer-quality-experiment.md`, `docs/v0.3-necessity-is-circular.md`, `docs/annotation-protocol.md` |
+| reports | `docs/answer-quality-experiment.md`, `docs/v0.3-necessity-is-circular.md`, `docs/annotation-protocol.md`, `docs/real-answer-gate-2026-09-18.md`, `docs/secondary-annotation-2026-09-18.md` |
+| run artefacts | `.local/` — gitignored; the run and judge JSON live there, never the raw store |
 
-171 tests, `ruff check`, `ruff format --check`, `mypy src tests` all clean.
+Validation status is refreshed after each imported annotation artifact; see the latest commit
+or working-tree test output for the exact count.
+
+183 tests, `ruff check`, `ruff format --check`, `mypy src tests` all clean.
 
 ## Error log, for whoever continues
 
