@@ -134,8 +134,14 @@ results.
    `Input exceeds the context limit (1048566 tokens)` where all three selective arms succeeded.
    Quality did **not** separate: the lexical metric puts every arm between 3.7% and 5.0% and
    ranks `full_history` *last*, while the blinded judge put `full_history` ahead 3–0 with 13 of
-   16 pairs tied. **Three decisions is not a result**, and the judge's requirements are quoted
-   from the arm most likely to resemble them. → `docs/real-answer-gate-2026-09-18.md`.
+   16 pairs tied. The wording confound — the requirements quote the reference answer, and
+   `full_history` is the arm most likely to resemble it — was **tested and refuted**: re-judging
+   the four decided pairs with the prose anchors rewritten moved **nothing** (4/4 either way,
+   control reproducing the original exactly). **The real problem is the floor**: across 48
+   requirement instances the judge credited `hybrid_router` **1** and `full_history` **9**, so
+   the decisions separate almost nothing. The requirements were written *from the original
+   answer*, which had the full conversation **and the user's follow-ups**; neither arm is that
+   answer, and re-judging cannot lift the ceiling. → `docs/real-answer-gate-2026-09-18.md`.
    *Still needs a documented model before any of it is publishable.*
 
 Routing gates are answered on synthetic data, where the labels are exact. Real replay answers

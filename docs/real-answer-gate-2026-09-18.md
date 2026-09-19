@@ -104,18 +104,73 @@ order agreement roughly one decision in five is positional noise, so the honest 
 the judge could not separate the arms on 13 of 16 pairs and, where it could, preferred
 `full_history`.
 
-### The confound that has to be checked before this is believed
+### The wording confound: tested, and refuted
 
-The judge scores against requirements **quoted from the reference answer**. `full_history` is
-the arm that sees the most of the conversation those requirements came from, so it is the arm
-most likely to reproduce their wording and their facts. A 3-0 in that direction is therefore
-consistent with a real quality difference *and* with the metric favouring the arm that saw more
-of the source.
+The judge scores against requirements **quoted from the reference answer**, and `full_history`
+is the arm that sees the most of the conversation those quotes came from. So the 3-0 could have
+been a phrase-matching advantage rather than a quality difference. It was tested two ways.
 
-Reading the judge's own reasoning, it is scoring content rather than phrasing — "names both
-files and run order", "τ₃ 变化仅数十秒，远小于 1090 s" — which argues against pure wording
-bias. But that is an argument, not a measurement, and it is the first thing to test if this
-line is continued.
+**Offline first, on the run already in hand.** If the judge rewards wording, the arm it picks
+should carry more of the requirement's quoted spans *literally*. It does — the four decided
+pairs are almost exactly the pairs where `full_history` carries more of them (3 of 4, against 1
+of 14 among the ties). But that is not evidence of a wording effect on its own, because a
+quoted span can be a filename or a number, and an answer naming the right file *is* more
+correct. Splitting the anchors settles which it is:
+
+| anchor class | count | can a paraphrase remove it? |
+|---|---:|---|
+| content only (digit or ASCII identifier) | 20 (42%) | no |
+| both kinds | 14 (29%) | no |
+| **prose only** | **13 (27%)** | **yes — the only class a wording effect acts on** |
+
+**Three of the four decisions carry at least one content anchor**; only `q-1370` rests on prose
+alone.
+
+**Then causally, on 16 calls.** The four decided pairs were re-judged twice: once with the
+original requirements, and once with the prose anchors rewritten and the content anchors
+(filenames, numbers, symbols, technical terms) left verbatim.
+
+| run | result |
+|---|---|
+| control — original requirements | 4/4 → `full_history`, order agreement 4/4 |
+| intervention — prose anchors reworded | **4/4 → `full_history`, order agreement 4/4** |
+
+**Nothing moved.** The control reproduces the original run exactly, so the judge is test-retest
+stable on these pairs and the null result is not noise. The paraphrased judge reasons about
+claims and cites the numbers — "COMSOL auxiliary/verification, not main solver", "gives rounding
+preference and 0.30×SE", "tens of seconds, far below 1090.5 s" — rather than matching the
+wording it was handed.
+
+**The confound is refuted. The 3-0 is not a phrase-matching artefact.**
+
+## What the run is actually measuring, and why it is at the floor
+
+The per-requirement credits are the number that matters most and the one nobody had counted.
+
+| | |
+|---|---:|
+| requirement instances judged | 48 requirements × 17 pairs |
+| credits the judge gave `hybrid_router` | **1** |
+| credits the judge gave `full_history` | **9** |
+
+**Both arms fail almost everything.** The 3-0 rests on a difference of eight credits out of
+forty-eight, and the honest reading is not "full history is better" but **"neither arm
+reproduces what the original answer contained, and full history reproduces slightly more of
+it"**.
+
+The reason is structural rather than about either arm. **The requirements were written from the
+original assistant's answer**, which had the entire preceding conversation *and the user's
+follow-up turns*. Neither a 1.7k-token selection nor a 370k-token history is that answer, and
+the requirements encode its specific conclusions. That is what caps the ceiling here, and no
+re-run of the judge can lift it.
+
+### One more trap, for whoever runs this next
+
+`ANTHROPIC_MODEL` in this environment is `deepseek-v4.1-flash[1M]`, where `[1M]` is Claude
+Code's context shorthand and not part of any model id. Calling the endpoint with it returns
+`400 模型不存在: deepseek-v4.1-flash[1M]`. The CLI needs `--model deepseek-v4.1-flash`
+explicitly. This one fails loudly, so it costs two calls rather than a table of zeros — but it
+is the same family as the budget trap and it is worth knowing before debugging a 400.
 
 ## What this establishes, and what it does not
 
@@ -123,9 +178,15 @@ line is continued.
 about **221x** at a median, and `full_history` fails to run on **10%** of them while the
 selective arms do not.
 
-**Does not establish.** Any quality difference in either direction. The lexical metric has no
-signal; the judge has three decisions and 18% positional noise; n = 20; and the judge's target
-is quoted from the arm most likely to resemble it.
+**Does not establish.** Any quality difference in either direction, and the reason is now
+sharper than "underpowered". The judge credited **1** requirement to `hybrid_router` and **9**
+to `full_history` across 48 requirement instances and 17 pairs — both arms fail almost
+everything, so the four decisions are a difference at the floor, not a separation. The
+requirements were written from the original answer, which had the full conversation *and* the
+user's follow-ups; neither arm is that answer. **Re-judging cannot fix this** — the ceiling is
+in the label set, not in the judge.
+
+The wording confound, by contrast, **is** settled: refuted, causally, on 16 calls.
 
 **Unpublishable regardless.** The model is a private proxy alias. Everything above is a
 measurement of *this* endpoint on *this* day, and the numbers would move under a documented
@@ -134,11 +195,14 @@ count rather than a judgement.
 
 ## If this line continues
 
-1. **Re-run under a documented model** — the one thing blocking publication.
-2. **Re-judge with requirements the judge cannot have been written from.** Either paraphrase the
-   requirements away from the reference wording, or have the judge score against a rubric
-   instead of the quoted spans. This is the confound above, and it is testable.
+1. **Write the requirements from the query, not from the answer.** This is the binding
+   constraint. "What must a correct answer to this query contain" is a different question from
+   "what did this answer happen to contain", and only the first one has a ceiling above the
+   floor. It is a labelling job, and it is the same shape as `answer_requirements` was — done by
+   reading, no retrieval, no counterfactual — so the protocol in
+   `docs/annotation-protocol.md` mostly carries over.
+2. **Re-run under a documented model** — still the thing blocking publication.
 3. **Report the executability failure as its own metric.** A 10% failure-to-run rate is a
-   routing argument that no quality metric can express.
-4. **Raise n before reading the tally.** Three decided pairs at 82% order agreement cannot
-   support a direction claim.
+   routing argument that no quality metric can express, and it is the part of this run that is
+   already solid.
+4. ~~Test the wording confound~~ — **done, refuted**; see above. Do not spend calls on it again.
