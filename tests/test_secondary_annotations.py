@@ -153,11 +153,28 @@ def test_committed_adjudication_is_valid_and_preserves_source_contradiction() ->
     assert audit.records == 6
     assert audit.requirements == 13
     assert audit.supported_requirements == 13
-    assert audit.gold_labels_changed == 0
-    assert audit.decision_inconsistencies == 0
+    # The 2026-09-18 adjudication's final labels are the answer-derived set it
+    # chose between. Three of its six checkpoints (B01/q-0157, B05/q-0107,
+    # B06/q-0193 -- the ones that overlap the answer gate) had their gold labels
+    # rewritten query-derived on 2026-09-19. Each of those three records was a
+    # "use_primary" decision: the adjudicator picked the primary text as final,
+    # so final == primary held against the old gold. After the rewrite the final
+    # text no longer equals the new primary, final_matches drops to "neither",
+    # and the use_primary consistency rule -- defined against the current gold --
+    # reports False. The adjudication itself is unchanged; what it was consistent
+    # *with* was replaced. B02/B03/B04 were not rewritten and still match.
+    # supported_requirements stays 13/13 because the finals still hold against
+    # their own answers.
+    rewritten = {detail.blind_id for detail in audit.details if not detail.decision_consistent}
+    assert rewritten == {"B01", "B05", "B06"}
+    assert audit.gold_labels_changed == 3
+    assert audit.decision_inconsistencies == 3
     corrected = next(detail for detail in audit.details if detail.blind_id == "B06")
-    assert corrected.final_matches == "primary"
-    assert corrected.decision_consistent
+    assert corrected.final_matches == "neither"
+    assert not corrected.decision_consistent
+    untouched = next(detail for detail in audit.details if detail.blind_id == "B02")
+    assert untouched.final_matches == "primary"
+    assert untouched.decision_consistent
 
 
 def test_no_answer_adjudication_cannot_carry_final_requirements() -> None:
