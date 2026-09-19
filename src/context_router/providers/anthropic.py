@@ -46,6 +46,15 @@ def _extract_text(payload: dict[str, Any], *, include_thinking: bool = False) ->
     return _blocks_of_type(payload, "thinking", "thinking")
 
 
+def _input_tokens(usage: dict[str, Any]) -> int:
+    """Count uncached, cache-written and cache-read input reported separately."""
+
+    return sum(
+        int(usage.get(field, 0) or 0)
+        for field in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+    )
+
+
 class AnthropicCompatibleVerdictModel:
     """Runs a prompt and returns the raw reply, for callers that parse their own output.
 
@@ -91,7 +100,7 @@ class AnthropicCompatibleVerdictModel:
         response.raise_for_status()
         payload = response.json()
         usage = payload.get("usage") or {}
-        input_tokens = int(usage.get("input_tokens", 0))
+        input_tokens = _input_tokens(usage)
         output_tokens = int(usage.get("output_tokens", 0))
         return AnswerResult(
             # A verdict is machine-parsed, so recovering it from the thinking is safe and
@@ -162,7 +171,7 @@ class AnthropicCompatibleAnswerProvider:
         response.raise_for_status()
         payload = response.json()
         usage = payload.get("usage") or {}
-        input_tokens = int(usage.get("input_tokens", 0))
+        input_tokens = _input_tokens(usage)
         output_tokens = int(usage.get("output_tokens", 0))
         return AnswerResult(
             text=_extract_text(payload),

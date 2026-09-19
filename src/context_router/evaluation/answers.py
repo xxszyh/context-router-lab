@@ -99,7 +99,10 @@ def answer_one(
     latency = time.perf_counter() - started
     coverage = deterministic_coverage(case.answer_requirements, result.text)
     refused = is_refusal(result.text)
-    answerable = bool(case.required_context_ids)
+    # Real-replay schema 2.0 deliberately has no required-context label: its absence says
+    # nothing about answerability. The benchmark already carries the explicit causal label,
+    # so using required_context_ids here would classify every real query as unanswerable.
+    answerable = not case.must_abstain
     return AnswerRecord(
         arm=arm,
         sample_id=case.sample_id,
@@ -115,7 +118,7 @@ def answer_one(
         coverage=coverage,
         strict_coverage=coverage if (answerable or not refused) else 0.0,
         refused=refused,
-        must_abstain=not answerable,
+        must_abstain=case.must_abstain,
         context_sha256=hashlib.sha256(built.rendered_text.encode("utf-8")).hexdigest()[:16],
         truncated=result.stop_reason in TRUNCATION_STOP_REASONS,
         latency_seconds=latency,

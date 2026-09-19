@@ -11,8 +11,15 @@ from typing import Annotated, Any, cast
 import typer
 
 from context_router.assembly import assemble_context
-from context_router.datasets import generate_synthetic_dataset, validate_dataset
-from context_router.datasets.real_replay import RealReplayAnnotation
+from context_router.datasets import (
+    AnswerAdjudicationSet,
+    SecondaryAnswerAnnotationSet,
+    audit_answer_adjudication,
+    audit_secondary_answer_annotations,
+    generate_synthetic_dataset,
+    validate_dataset,
+)
+from context_router.datasets.real_replay import RealReplayAnnotation, answer_after
 from context_router.domain import (
     AssemblyRequest,
     BenchmarkQuery,
@@ -77,6 +84,50 @@ def _write_json(path: Path, value: object) -> None:
 def _read_benchmark(path: Path) -> list[BenchmarkQuery]:
     with path.open(encoding="utf-8") as handle:
         return [BenchmarkQuery.model_validate_json(line) for line in handle if line.strip()]
+
+
+@app.command("audit-secondary-annotations")
+def audit_secondary_annotations_command(
+    annotations: Annotated[Path, typer.Argument(help="Primary real-replay annotation JSON")],
+    secondary: Annotated[Path, typer.Argument(help="Independent answer-annotation JSON")],
+    database: Annotated[Path, typer.Argument(help="Local event store")],
+    output: Annotated[Path, typer.Argument(help="Audit JSON output")],
+) -> None:
+    """Audit an independent label set without overwriting or adjudicating the gold labels."""
+
+    primary = RealReplayAnnotation.model_validate_json(annotations.read_text(encoding="utf-8"))
+    second = SecondaryAnswerAnnotationSet.model_validate_json(secondary.read_text(encoding="utf-8"))
+    events = SQLiteEventStore(database).list_events(primary.source_session_id)
+    answers = {
+        checkpoint.sample_id: answer_after(events, checkpoint.as_of_sequence)
+        for checkpoint in primary.checkpoints
+    }
+    audit = audit_secondary_answer_annotations(second, primary, answers)
+    _write_json(output, audit.model_dump(mode="json"))
+    typer.echo(str(output))
+
+
+@app.command("audit-answer-adjudication")
+def audit_answer_adjudication_command(
+    annotations: Annotated[Path, typer.Argument(help="Primary real-replay annotation JSON")],
+    secondary: Annotated[Path, typer.Argument(help="Independent answer-annotation JSON")],
+    adjudication: Annotated[Path, typer.Argument(help="Completed adjudication JSON")],
+    database: Annotated[Path, typer.Argument(help="Local event store")],
+    output: Annotated[Path, typer.Argument(help="Audit JSON output")],
+) -> None:
+    """Check final labels and expose decision/text contradictions without rewriting them."""
+
+    primary = RealReplayAnnotation.model_validate_json(annotations.read_text(encoding="utf-8"))
+    second = SecondaryAnswerAnnotationSet.model_validate_json(secondary.read_text(encoding="utf-8"))
+    final = AnswerAdjudicationSet.model_validate_json(adjudication.read_text(encoding="utf-8"))
+    events = SQLiteEventStore(database).list_events(primary.source_session_id)
+    answers = {
+        checkpoint.sample_id: answer_after(events, checkpoint.as_of_sequence)
+        for checkpoint in primary.checkpoints
+    }
+    audit = audit_answer_adjudication(final, primary, second, answers)
+    _write_json(output, audit.model_dump(mode="json"))
+    typer.echo(str(output))
 
 
 def _session_contexts(
@@ -271,6 +322,12 @@ def _stratified_sample(cases: list[ArmCase], limit: int) -> list[ArmCase]:
         if not progressed:
             break
         depth += 1
+    # Sparse query-type buckets can exhaust their quota before ``limit``. Fill the tail from
+    # the still-unselected timeline instead of silently running fewer paid calls than reported.
+    selected_ids = {case.sample_id for case in sampled}
+    sampled.extend(
+        case for case in cases if case.sample_id not in selected_ids and len(sampled) < limit
+    )
     return sampled
 
 
@@ -326,12 +383,28 @@ def answer_experiment_command(
         f"model={resolved_model} max_tokens={max_tokens}"
     )
     records: list[AnswerRecord] = []
+    failures: list[dict[str, object]] = []
     for index, case in enumerate(cases, start=1):
         for name in chosen:
             try:
                 record = answer_one(case, cast(ArmName, name), provider, router=router)
             except Exception as error:  # noqa: BLE001 - one failed call must not lose the run
                 typer.echo(f"  [{index}/{len(cases)}] {name} FAILED: {type(error).__name__}")
+                response = getattr(error, "response", None)
+                failure: dict[str, object] = {
+                    "sample_id": case.sample_id,
+                    "arm": name,
+                    "error_type": type(error).__name__,
+                }
+                if response is not None:
+                    failure["http_status"] = getattr(response, "status_code", None)
+                    try:
+                        payload = response.json()
+                    except Exception:  # noqa: BLE001 - an HTML error page is still a failure
+                        payload = None
+                    if isinstance(payload, dict):
+                        failure["provider_error"] = payload.get("error", payload.get("type"))
+                failures.append(failure)
                 continue
             records.append(record)
             typer.echo(
@@ -349,6 +422,9 @@ def answer_experiment_command(
         "token_budget": token_budget,
         "arms": chosen,
         "checkpoints": len(cases),
+        "expected_calls": len(chosen) * len(cases),
+        "completed_calls": len(records),
+        "failures": failures,
         "summary": summary,
         "frontier": [point.__dict__ for point in quality_token_frontier(summary)],
         "records": [record.model_dump(mode="json") for record in records],

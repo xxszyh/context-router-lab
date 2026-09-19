@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from context_router.cli import _stratified_sample
 from context_router.datasets import generate_synthetic_dataset
 from context_router.evaluation.answers import (
     AnswerRecord,
@@ -86,6 +87,17 @@ def test_answer_one_records_cost_coverage_and_provenance(cases: list[ArmCase]) -
     assert record.truncated is False
     assert record.latency_seconds >= 0.0
     assert provider.calls and provider.calls[0][0] == case.query
+
+
+def test_answerability_uses_explicit_label_not_required_contexts(cases: list[ArmCase]) -> None:
+    """Real replay has no required-context ids but its labelled replies are answerable."""
+
+    source = next(case for case in cases if case.required_context_ids)
+    real_style = source.model_copy(update={"required_context_ids": [], "must_abstain": False})
+    record = answer_one(real_style, "full_history", StubProvider())
+
+    assert record.must_abstain is False
+    assert record.strict_coverage == record.coverage
 
 
 def test_a_truncated_answer_is_flagged_not_silently_scored(cases: list[ArmCase]) -> None:
@@ -186,3 +198,20 @@ def test_answer_cases_carry_the_same_labels_as_the_routing_harness(cases: list[A
     assert all(case.answer_requirements for case in cases if case.required_context_ids)
     assert all(case.token_budget == 2048 for case in cases)
     assert build_arm_cases.__module__ == "context_router.evaluation.arms"
+
+
+def test_stratified_sample_fills_limit_when_some_type_buckets_are_sparse(
+    cases: list[ArmCase],
+) -> None:
+    counts = {"return": 7, "cross_context": 5, "switch": 5, "short": 3, "continue": 2, "new": 2}
+    source = cases[0]
+    sparse = [
+        source.model_copy(update={"sample_id": f"{kind}-{index}", "query_type": kind})
+        for kind, count in counts.items()
+        for index in range(count)
+    ]
+
+    sampled = _stratified_sample(sparse, 20)
+
+    assert len(sampled) == 20
+    assert len({case.sample_id for case in sampled}) == 20

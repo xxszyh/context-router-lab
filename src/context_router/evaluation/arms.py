@@ -110,6 +110,7 @@ class ArmCase(Contract):
     required_context_ids: list[str] = Field(default_factory=list)
     acceptable_evidence_sets: list[list[str]] = Field(default_factory=list)
     answer_requirements: list[str] = Field(default_factory=list)
+    must_abstain: bool = False
     relation_label: Relation = "unknown"
     primary_context_id: str | None = None
     recent_context_ids: list[str] = Field(default_factory=list)
@@ -329,6 +330,7 @@ def build_arm_cases(
                 required_context_ids=list(sample.required_context_ids),
                 acceptable_evidence_sets=[list(item) for item in sample.acceptable_evidence_sets],
                 answer_requirements=list(sample.answer_requirements),
+                must_abstain=sample.must_abstain,
                 relation_label=sample.relation_label,
                 primary_context_id=sample.primary_context_id,
                 recent_context_ids=list(sample.recent_context_ids),

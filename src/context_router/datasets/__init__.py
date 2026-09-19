@@ -13,6 +13,18 @@ from context_router.datasets.real_replay import (
     to_benchmark_queries,
     validate_real_replay,
 )
+from context_router.datasets.secondary_annotations import (
+    AdjudicationRecordAudit,
+    AnswerAdjudicationAudit,
+    AnswerAdjudicationRecord,
+    AnswerAdjudicationSet,
+    SecondaryAnnotationAudit,
+    SecondaryAnswerAnnotationSet,
+    SecondaryAnswerRecord,
+    SecondaryRecordAudit,
+    audit_answer_adjudication,
+    audit_secondary_answer_annotations,
+)
 from context_router.datasets.synthetic import (
     DEFAULT_CONTEXTS,
     DEFAULT_EPISODES,
@@ -24,12 +36,22 @@ from context_router.datasets.validation import validate_dataset
 
 __all__ = [
     "DEFAULT_CONTEXTS",
+    "AdjudicationRecordAudit",
     "AnnotatedCheckpoint",
+    "AnswerAdjudicationAudit",
+    "AnswerAdjudicationRecord",
+    "AnswerAdjudicationSet",
     "AnnotationCoverage",
     "RealReplayAnnotation",
     "RealReplayValidation",
+    "SecondaryAnswerAnnotationSet",
+    "SecondaryAnswerRecord",
+    "SecondaryAnnotationAudit",
+    "SecondaryRecordAudit",
     "ScrubError",
     "annotation_coverage",
+    "audit_answer_adjudication",
+    "audit_secondary_answer_annotations",
     "assert_clean",
     "DEFAULT_EPISODES",
     "SyntheticDataset",

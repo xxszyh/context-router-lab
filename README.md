@@ -76,6 +76,8 @@ ctxlab generate-synthetic run/dataset --sessions 60
 ctxlab ingest            run/events.sqlite run/dataset/records.jsonl
 ctxlab validate-dataset  run/events.sqlite run/dataset/benchmark.jsonl
 ctxlab compare-baselines run/events.sqlite run/dataset/benchmark.jsonl run/arms.json
+ctxlab audit-secondary-annotations primary.json secondary.json events.sqlite audit.json
+ctxlab audit-answer-adjudication primary.json secondary.json adjudication.json events.sqlite audit.json
 ctxlab report            run/arms.json run/arms_report.md
 ```
 

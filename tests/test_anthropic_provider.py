@@ -69,6 +69,37 @@ def test_provider_uses_the_anthropic_version_header() -> None:
     assert requests[0].headers["anthropic-version"] == "2023-06-01"
 
 
+def test_provider_counts_every_prompt_cache_token() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "model": "some-pinned-model",
+                "content": [{"type": "text", "text": "done"}],
+                "usage": {
+                    "input_tokens": 59,
+                    "cache_creation_input_tokens": 100,
+                    "cache_read_input_tokens": 71000,
+                    "output_tokens": 12,
+                },
+            },
+        )
+
+    provider = AnthropicCompatibleAnswerProvider(
+        base_url="https://example.invalid",
+        api_key="test-key",
+        model="some-pinned-model",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    result = provider.answer(query="q", working_context="memory", instructions="rules")
+
+    assert result.input_tokens == 71159
+    assert result.total_tokens == 71171
+
+
 def test_provider_sends_the_token_as_a_bearer_authorization() -> None:
     requests: list[httpx.Request] = []
     make_provider(requests, auth_style="bearer").answer(

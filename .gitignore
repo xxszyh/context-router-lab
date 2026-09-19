@@ -23,6 +23,7 @@ htmlcov/
 
 # Generated experiment artefacts. Real records are never committed; keep every
 # dataset, index, trace and report local.
+.local/
 datasets/synthetic/
 datasets/sanitized/
 reports/
