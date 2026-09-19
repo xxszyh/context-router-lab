@@ -51,17 +51,29 @@ all.** 20 checkpoints: `hybrid_router` reads **1,671** memory tokens, `full_hist
 **370,102** (range 53,381–836,459), input-token ratio **215x**. Two of the twenty were rejected
 by the server at `>1,048,566 tokens` for `full_history` and succeeded on all three selective
 arms — a **10% failure-to-run rate against 0%**, which no quality metric can express.
-*Grade: exact — tokens and status codes are counted. The quality half of the same run is
-underpowered and the two instruments disagree; see "Not established".*
+*Grade: exact — tokens and status codes are counted.*
+
+**8. The answer gate's ceiling is lifted, and a control separates the arms.** The 2026-09-18
+quality failure was in the labels, not the arms: requirements written from the original answer
+put both arms at the floor. On 2026-09-19 the 20 gate checkpoints were re-labelled **from the
+query, with the original reply withheld**. The new set passes scoreability (59/59 matchable),
+contamination (8 of 9 recalled anchors were visible before the query; the ninth is the user's
+own wording) and discrimination (off-diagonal 0.058). A free coverage-judge control on the new
+labels splits `hybrid_router` from `full_history` **9–2, 6 ties** — the separation the old set
+could not produce. The diagonal's drop from 1.000 to 0.342 is the point: the old set was scoring
+itself. *Grade: the control is exact and deterministic; it is a lexical scorer, not a verdict.
+The paid blinded judge on the new labels is the one measurement still outstanding →
+`docs/query-derived-labels-2026-09-19.md`.*
 
 ## Not established
 
-**Answer quality, in magnitude.** On real conversations the judge agrees with itself across
-answer order only **82%**, decided 3 of 16 answerable pairs, and tied the rest; the lexical
-metric has no signal there at all (3.7–5.0% for every arm). The two instruments **disagree on
-direction** on real replay, having agreed on synthetic data — so that agreement was a property
-of constructed evidence and does not transfer. n = 20. **Nothing here is publishable as a
-quality result.** → `docs/real-answer-gate-2026-09-18.md`.
+**Answer quality, in magnitude.** Still not publishable, but the reason moved. The 2026-09-18
+verdict ("judge 82% consistent, decided 3 of 16, nothing publishable") was a property of labels
+written from the original answer; on 2026-09-19 those labels were replaced with a query-derived
+set and a free control now separates the arms (see **8**). What remains unmeasured is the
+**paid blinded judge on the new labels** — the one number the quality half needs. n = 20.
+→ `docs/real-answer-gate-2026-09-18.md` (the old result) and
+`docs/query-derived-labels-2026-09-19.md` (the reopened gate).
 
 **Anything about a documented model.** Every call-based number used `deepseek-v4.1-flash`
 through a private Anthropic-compatible proxy. The alias is not reproducible by anyone else and
@@ -99,7 +111,11 @@ results.
 
 ## Next step, in order
 
-1. ~~Write `answer_requirements` for the 26 real checkpoints~~ — **done, and they discriminate.**
+1. ~~Write `answer_requirements` for the 26 real checkpoints~~ — **done, and they discriminate.
+   Superseded on 2026-09-19: this set was written from the answer and capped the gate at the
+   floor; the 20 gate checkpoints were re-labelled from the query (see 5).** The numbers below
+   describe that first, answer-derived set, kept because its 1.000 diagonal is exactly the
+   self-measurement the rewrite removed.
    The labels live on the checkpoints in `datasets/real-replay/claude-d22f2593.json`, behind the
    same PII gate the export path uses; 65 requirements over 24 checkpoints (two have none: their
    reference turn was interrupted
@@ -143,6 +159,15 @@ results.
    answer*, which had the full conversation **and the user's follow-ups**; neither arm is that
    answer, and re-judging cannot lift the ceiling. → `docs/real-answer-gate-2026-09-18.md`.
    *Still needs a documented model before any of it is publishable.*
+5. **The answer gate's labels re-derived from the query** — **done, and the ceiling is gone.**
+   The 2026-09-18 gate failed at the floor because its requirements were written from the
+   original answer. On 2026-09-19 the 20 gate checkpoints were re-labelled with the original
+   reply withheld. The new 59-requirement set passes scoreability, contamination (no anchor is
+   answer-only) and discrimination (off-diagonal 0.058), and a free coverage control now
+   separates `hybrid_router` from `full_history` 9–2-6. **Outstanding: the paid blinded judge
+   on the new labels** — needs the endpoint credentials and `--model deepseek-v4.1-flash`
+   (the env `ANTHROPIC_MODEL` has the unreproducible `[1M]` suffix). Command in
+   `docs/query-derived-labels-2026-09-19.md`.
 
 Routing gates are answered on synthetic data, where the labels are exact. Real replay answers
 the quality and cost question. That split is v0.3's main consequence.
