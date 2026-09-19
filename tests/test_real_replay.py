@@ -13,7 +13,9 @@ from context_router.datasets.real_replay import (
     ScrubError,
     annotation_coverage,
     assert_clean,
+    assert_no_machine_identity,
     export_sanitized,
+    machine_identity_tokens,
     scrub,
     to_benchmark_queries,
     validate_real_replay,
@@ -25,6 +27,68 @@ from context_router.storage import SQLiteEventStore
 PHONE = "13800138000"
 EMAIL = "someone@example.com"
 HOME = r"C:\Users\somebody\Desktop\proj\p2.py"
+
+
+def test_scrub_removes_a_windows_path_written_with_escaped_backslashes() -> None:
+    """The form a path takes inside a tool call's JSON arguments.
+
+    The single-backslash pattern does not match doubled backslashes, so the drive letter was
+    rewritten to `<abs>/` on its own and `\\Users\\<name>\\...` survived -- silently, because
+    the export gate looks for drive letters and a username is not one of them. Found by
+    generating a worksheet from tool-call events rather than prose.
+    """
+
+    escaped = r'Read {"file_path": "C:\\Users\\somebody\\Desktop\\proj\\p2.py"}'
+    cleaned = scrub(escaped)
+
+    assert "somebody" not in cleaned, cleaned
+    assert_clean(cleaned, where="escaped path")
+    # `<home>` replaces the home prefix, not the whole path, so the tail stays -- which is
+    # deliberate: the tail is the project name and it is the signal the benchmark runs on.
+    assert scrub("see /home/somebody/proj") == "see <home>/proj"
+    assert scrub(r"C:\Users\somebody\Desktop") == "<home>\\Desktop"
+
+
+def test_scrub_removes_the_project_directory_slug() -> None:
+    """The third path shape, and the one that made the case for checking by value.
+
+    `C:\\Users\\<name>\\proj` appears as `C--Users-<name>-proj` in temp and session paths. Every
+    separator-based pattern misses it.
+    """
+
+    slug = r"<home>\AppData\Local\Temp\claude\C--Users-somebody-Desktop-proj\task"
+    cleaned = scrub(slug)
+
+    assert "somebody" not in cleaned, cleaned
+
+
+def test_the_gate_catches_the_local_user_name_by_value() -> None:
+    """Derived from the environment at call time, so it is never committed and never goes stale.
+
+    Three path shapes have been found to carry the name past the scrubber. Checking the value
+    instead of the shape is the only version that keeps working when a fourth appears.
+    """
+
+    tokens = machine_identity_tokens()
+    assert tokens, "this machine should have a user name to check for"
+    with pytest.raises(ScrubError):
+        assert_no_machine_identity(f"a path mentioning {tokens[0]} here", where="test")
+
+
+def test_the_value_check_does_not_fire_on_ordinary_text() -> None:
+    assert_no_machine_identity("a sentence with no local identifiers in it", where="test")
+
+
+def test_the_gate_catches_a_home_directory_that_survived_scrubbing() -> None:
+    """Structural, not value-based: the leak is a username, and those cannot be enumerated."""
+
+    for leaked in (r"<abs>/\Users\somebody\Desktop", "prefix /Users/somebody/x", "/home/name/y"):
+        with pytest.raises(ScrubError):
+            assert_clean(leaked, where="test")
+
+
+def test_a_url_path_that_merely_contains_home_is_not_a_leak() -> None:
+    assert_clean("see https://example.com/home/page for details", where="test")
 
 
 def test_scrub_removes_pii_but_keeps_the_task_identifier() -> None:

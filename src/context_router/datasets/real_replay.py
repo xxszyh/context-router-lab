@@ -22,6 +22,7 @@ a subset of the conversation rather than the conversation.
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -58,7 +59,19 @@ _REDACTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+"), "<email>"),
     (re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)"), "<phone>"),
     (re.compile(r"[A-Za-z]:\\Users\\[^\\\s\"']+"), "<home>"),
+    # The same path written with escaped backslashes, which is how it appears inside a tool
+    # call's JSON arguments. The pattern above expects one backslash and does not match the
+    # doubled form, so the drive letter alone was rewritten to `<abs>/` and `\Users\<name>\…`
+    # survived in the clear -- silently, because the export gate looks for drive letters and a
+    # username is not one of the things it looks for. Found by building a worksheet out of
+    # tool-call events rather than prose.
+    (re.compile(r"[A-Za-z]:\\+Users\\+[^\\\s\"']+"), "<home>"),
     (re.compile(r"/(?:home|Users)/[^/\s\"']+"), "<home>"),
+    # Claude Code's project-directory slug: `C:\Users\<name>\proj` appears as
+    # `C--Users-<name>-proj` in temp and session paths. Every pattern above keys on a separator
+    # that the slug does not have, so the user name travels in plain sight -- found in a
+    # worksheet built from prose messages, as the third distinct path shape to get through.
+    (re.compile(r"(?<![A-Za-z0-9])[A-Za-z]--(?:Users|home)-[A-Za-z0-9._-]+"), "<home>"),
     # A drive letter, not any letter followed by a colon: without the lookbehind this also
     # rewrites the `s:/` inside `https://`, and the export gate then fails on every URL.
     (re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:[\\/]"), "<abs>/"),
@@ -77,6 +90,12 @@ _FORBIDDEN: tuple[tuple[str, re.Pattern[str]], ...] = (
     # first version of this pattern flagged 172 of 7 705 real events, none of them actually
     # a path, which is how the lookbehind got here.
     ("drive-path", re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:[\\/]")),
+    # A home directory that survived scrubbing. Checked structurally rather than by value:
+    # the scrubber rewrites these to `<home>`, which contains neither, so a match means one got
+    # through -- and no list of forbidden *values* could catch it, because the thing that leaks
+    # is a username and there is no way to enumerate those. The lookbehind keeps a URL path like
+    # `example.com/home/x` from tripping it.
+    ("unredacted-home", re.compile(r"(?<![A-Za-z0-9])[\\/](?:Users|home)[\\/][^\\/\s\"'<>]+")),
 )
 
 
@@ -114,6 +133,35 @@ def assert_clean(text: str, *, where: str) -> None:
         match = pattern.search(text)
         if match:
             raise ScrubError(f"{label} survived scrubbing in {where}: {_mask(match.group(0))}")
+
+
+def machine_identity_tokens() -> list[str]:
+    """What this machine calls its user, read at call time and never written down.
+
+    A list of forbidden *values* cannot be committed: the repository is public, so recording the
+    user name inside the gate would be the leak the gate exists to prevent. It is derived from
+    the environment instead, and the check below then looks for whatever this machine happens to
+    call itself. Tokens shorter than three characters are dropped -- they would match ordinary
+    prose, and the point is to catch an identifier, not a syllable.
+    """
+
+    candidates = {os.environ.get("USERNAME", ""), os.environ.get("USER", ""), Path.home().name}
+    return sorted(token for token in candidates if len(token) >= 3)
+
+
+def assert_no_machine_identity(text: str, *, where: str) -> None:
+    """Refuse text that still names the local user, whatever route it took to get there.
+
+    Three path shapes have now been found to carry the name past the scrubber: `C:\\Users\\<n>`,
+    the escaped `C:\\\\Users\\\\<n>` inside tool-call JSON, and the slug `C--Users-<n>-proj`.
+    Chasing shapes is whack-a-mole. Checking the value is not, and it is the only version that
+    keeps working when the next shape appears.
+    """
+
+    lowered = text.lower()
+    for token in machine_identity_tokens():
+        if token.lower() in lowered:
+            raise ScrubError(f"machine user name survived scrubbing in {where}: {_mask(token)}")
 
 
 class AnnotatedCheckpoint(Contract):
@@ -305,8 +353,13 @@ def export_sanitized(
         where = f"{destination}/sanitized.json:{event.event_id}"
         assert_clean(event.content, where=where)
         assert_clean(json.dumps(event.payload, ensure_ascii=False), where=where)
+        # The pattern list cannot cover every shape a path takes, and the thing that leaks is
+        # this machine's user name rather than any fixed string. Checked by value as well.
+        assert_no_machine_identity(event.content, where=where)
+        assert_no_machine_identity(json.dumps(event.payload, ensure_ascii=False), where=where)
     for context in contexts:
         assert_clean(context.model_dump_json(), where=f"{destination}/sanitized.json")
+        assert_no_machine_identity(context.model_dump_json(), where=f"{destination}/sanitized.json")
     for item in assignments:
         assert_clean(item.model_dump_json(), where=f"{destination}/sanitized.json")
 
