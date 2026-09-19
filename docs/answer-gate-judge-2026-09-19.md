@@ -78,8 +78,13 @@ refuted. Three reasons, all measured above:
 
 ## Next, in the order decided
 
-1. **Re-run the whole gate under a documented, fixed model.** The gateway already exposes many
-   (`/v1/models` lists them); pick one with a stable public name and re-answer + re-judge.
+1. **Re-run the whole gate under a documented, fixed model.** The blocker was that
+   `deepseek-v4.1-flash` is a private proxy alias. The gateway does not accept DeepSeek's
+   documented public id (`deepseek-flash` → `400 模型不存在` -- it is a proxy with its own
+   naming, not the official endpoint), but it serves several **publicly documented** model ids
+   confirmed answering with text on 2026-09-19: `deepseek-v3.2`, `qwen3-max`, `kimi-k2.5`,
+   `glm-4.7`, `minimax-m2.5`, and the dated `deepseek-v4-flash-0731`. Re-answer + re-judge under
+   one of these so the result is reproducible off the proxy alias.
 2. **Enlarge the sample.** The 6 labelled checkpoints that never entered the gate
    (`q-0219, q-1426, q-1892, q-1944, q-1998, q-2450`) and any new conversations raise n from 20.
 3. Only then read a quality direction off the result. Until both happen, the honest statement is:
