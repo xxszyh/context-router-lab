@@ -51,7 +51,15 @@ all.** 20 checkpoints: `hybrid_router` reads **1,671** memory tokens, `full_hist
 **370,102** (range 53,381–836,459), input-token ratio **215x**. Two of the twenty were rejected
 by the server at `>1,048,566 tokens` for `full_history` and succeeded on all three selective
 arms — a **10% failure-to-run rate against 0%**, which no quality metric can express.
-*Grade: exact — tokens and status codes are counted.*
+
+That 10% was measured against a 1M proxy alias, which was itself generous. Measured against the
+context windows that **publicly documented** models actually serve — 258,048 for `qwen3-max`,
+260,096 for `kimi-k2.5`, both read off the gateway's own refusal — `full_history`'s median input
+of **485,966** (max 1,042,473) puts it over the limit on **13 of 18** checkpoints: a **72%
+failure-to-run rate**. The claim is not that routing is cheaper than reading everything; it is
+that at a documented model's ceiling, reading everything is not an available strategy at all.
+→ `docs/documented-model-selection-2026-09-20.md`.
+*Grade: exact — tokens and status codes are counted; the ceilings are the gateway's own.*
 
 **8. The answer gate's ceiling is lifted, and a control separates the arms.** The 2026-09-18
 quality failure was in the labels, not the arms: requirements written from the original answer
@@ -77,10 +85,17 @@ set and a free control now separates the arms (see **8**). What remains unmeasur
 → `docs/real-answer-gate-2026-09-18.md` (the old result) and
 `docs/query-derived-labels-2026-09-19.md` (the reopened gate).
 
-**Anything about a documented model.** Every call-based number used `deepseek-v4.1-flash`
-through a private Anthropic-compatible proxy. The alias is not reproducible by anyone else and
-the operator can change what it resolves to. Marked as such in the README and in
-`answer-quality-experiment.md`.
+**Anything about a documented model.** Every *existing* call-based number used
+`deepseek-v4.1-flash` through a private Anthropic-compatible proxy. The alias is not reproducible
+by anyone else and the operator can change what it resolves to. Marked as such in the README and
+in `answer-quality-experiment.md`.
+
+The selection half of this is now done — `kimi-k2.5` and `qwen3-max` are publicly documented
+names served on `anthropic:messages`, and both were verified to read a long prompt faithfully
+(a planted marker recovered at 25%, 50% and 75% depth of a 130k-token prompt, so the earlier
+`input_tokens=13` reading was a broken usage report rather than silent truncation). What is not
+established is a **result** under one: the re-run is measured, not yet judged.
+→ `docs/documented-model-selection-2026-09-20.md`.
 
 **The real-replay routing gates.** See blockers.
 
@@ -171,6 +186,14 @@ results.
    flatter routing, and still underpowered. → `docs/answer-gate-judge-2026-09-19.md`.
    **Outstanding: re-run under a documented fixed model (the gateway exposes many), then enlarge
    the sample with the 6 labelled-but-unrun checkpoints.**
+6. **Choosing the documented model, and what it costs the comparison** — **done, and it
+   reshapes the gate.** `minimax-m3` was the only documented candidate advertising the 1M the
+   `full_history` arm needs; it reads a 20k prompt fine but at 500k returns a *garbled* marker,
+   an empty content block and raw filler, so its advertised window is not usable. Under the two
+   candidates that are trustworthy the arm runs on 5 of 18 checkpoints, so the powered comparison
+   is **`hybrid_router` vs `query_recent_only`** — relevance against recency at equal budget,
+   both running everywhere, and the comparison a deployed router actually faces. `full_history`
+   is reported where it survived, with its n. → `docs/documented-model-selection-2026-09-20.md`.
 
 Routing gates are answered on synthetic data, where the labels are exact. Real replay answers
 the quality and cost question. That split is v0.3's main consequence.
