@@ -398,11 +398,11 @@ def export_sanitized(
     for event in events:
         where = f"{destination}/sanitized.json:{event.event_id}"
         # `content` is prose and is read as prose; `payload` is JSON and is read as JSON. Checking
-        # the serialised payload instead would let its escape sequences be read as data, and
-        # `A:\n` is character-for-character a drive path -- the false alarm that made this
-        # function exist. The value check runs alongside the patterns, because the pattern list
-        # cannot cover every shape a path takes and the thing that leaks is this machine's user
-        # name rather than any fixed string.
+        # the serialised payload instead would let its escape sequences be read as data, and an
+        # arm label followed by a newline is character-for-character a drive path -- the false
+        # alarm that made this function exist. The value check runs alongside the patterns,
+        # because the pattern list cannot cover every shape a path takes and the thing that leaks
+        # is this machine's user name rather than any fixed string.
         assert_clean_artifact(event.content, where=where)
         assert_clean_artifact(json.dumps(event.payload, ensure_ascii=False), where=where)
     for context in contexts:
