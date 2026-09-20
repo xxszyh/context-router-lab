@@ -164,6 +164,50 @@ def assert_no_machine_identity(text: str, *, where: str) -> None:
             raise ScrubError(f"machine user name survived scrubbing in {where}: {_mask(token)}")
 
 
+def assert_clean_artifact(text: str, *, where: str) -> None:
+    """Gate a whole artifact, checking JSON at the layer its content actually lives in.
+
+    `assert_clean` on serialised JSON reads escape sequences as data, and the drive-path pattern
+    cannot tell the two apart: in a judge transcript the arm label followed by a newline is
+    written `A:\\n`, which is character-for-character a Windows drive path. It fired on a judge
+    output that contains no path at all -- one hit in the raw text, zero in the parsed values.
+
+    That is not a cosmetic false alarm. A gate that cries wolf on a clean artifact is a gate
+    somebody switches off, and the next real leak goes through the hole it left. The fix is the
+    same one `assert_no_machine_identity` already makes for shapes, applied to layers: check the
+    values the reader will see, not the encoding they are stored in. `json.loads` resolves `\\n`
+    back to a newline, `A:\\n` stops looking like a drive, and `C:\\\\Users` still does.
+
+    Falls back to the raw text when the artifact is not JSON, which is the case the original
+    check was written for.
+    """
+
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        assert_clean(text, where=where)
+        assert_no_machine_identity(text, where=where)
+        return
+
+    leaves: list[str] = []
+
+    def walk(node: object) -> None:
+        if isinstance(node, str):
+            leaves.append(node)
+        elif isinstance(node, dict):
+            for key, value in node.items():
+                leaves.append(str(key))
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(parsed)
+    for index, leaf in enumerate(leaves):
+        assert_clean(leaf, where=f"{where}:leaf{index}")
+        assert_no_machine_identity(leaf, where=f"{where}:leaf{index}")
+
+
 class AnnotatedCheckpoint(Contract):
     """One query position in a real conversation, with its labels.
 
@@ -351,17 +395,18 @@ def export_sanitized(
     # UUIDs and are deliberately not redacted, so scanning them only produces false alarms.
     for event in events:
         where = f"{destination}/sanitized.json:{event.event_id}"
-        assert_clean(event.content, where=where)
-        assert_clean(json.dumps(event.payload, ensure_ascii=False), where=where)
-        # The pattern list cannot cover every shape a path takes, and the thing that leaks is
-        # this machine's user name rather than any fixed string. Checked by value as well.
-        assert_no_machine_identity(event.content, where=where)
-        assert_no_machine_identity(json.dumps(event.payload, ensure_ascii=False), where=where)
+        # `content` is prose and is read as prose; `payload` is JSON and is read as JSON. Checking
+        # the serialised payload instead would let its escape sequences be read as data, and
+        # `A:\n` is character-for-character a drive path -- the false alarm that made this
+        # function exist. The value check runs alongside the patterns, because the pattern list
+        # cannot cover every shape a path takes and the thing that leaks is this machine's user
+        # name rather than any fixed string.
+        assert_clean_artifact(event.content, where=where)
+        assert_clean_artifact(json.dumps(event.payload, ensure_ascii=False), where=where)
     for context in contexts:
-        assert_clean(context.model_dump_json(), where=f"{destination}/sanitized.json")
-        assert_no_machine_identity(context.model_dump_json(), where=f"{destination}/sanitized.json")
+        assert_clean_artifact(context.model_dump_json(), where=f"{destination}/sanitized.json")
     for item in assignments:
-        assert_clean(item.model_dump_json(), where=f"{destination}/sanitized.json")
+        assert_clean_artifact(item.model_dump_json(), where=f"{destination}/sanitized.json")
 
     blob = json.dumps(
         {

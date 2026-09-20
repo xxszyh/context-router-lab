@@ -13,6 +13,7 @@ from context_router.datasets.real_replay import (
     ScrubError,
     annotation_coverage,
     assert_clean,
+    assert_clean_artifact,
     assert_no_machine_identity,
     export_sanitized,
     machine_identity_tokens,
@@ -77,6 +78,46 @@ def test_the_gate_catches_the_local_user_name_by_value() -> None:
 
 def test_the_value_check_does_not_fire_on_ordinary_text() -> None:
     assert_no_machine_identity("a sentence with no local identifiers in it", where="test")
+
+
+def test_the_gate_reads_json_at_the_layer_its_content_lives_in() -> None:
+    """An arm label plus a newline is character-for-character a Windows drive path.
+
+    In a judge transcript the text `Evaluate A:` followed by a newline is stored as `A:\\n`, and
+    `assert_clean` on the serialised text cannot tell that from the drive `A:\\`. It fired on a
+    judge output containing no path at all: one hit in the raw text, zero in the parsed values.
+
+    A gate that cries wolf on a clean artifact is a gate somebody switches off, and the next
+    real leak goes through the hole it left -- so the fix is the one `assert_no_machine_identity`
+    already makes for shapes, applied to layers.
+    """
+
+    import json
+
+    assert_clean_artifact(json.dumps({"r": "Evaluate A:\n- Req1"}), where="test")
+    assert_clean_artifact(json.dumps({"r": "arm A:\nyes\narm B:\nno"}), where="test")
+    # The serialised form is exactly what the pattern matches, which is why the layer matters.
+    with pytest.raises(ScrubError, match="drive-path"):
+        assert_clean(json.dumps({"r": "Evaluate A:\n- Req1"}), where="test")
+
+
+def test_the_artifact_gate_still_catches_a_real_path_inside_json() -> None:
+    """Resolving escapes must not become a way through."""
+
+    import json
+
+    with pytest.raises(ScrubError, match="drive-path"):
+        assert_clean_artifact(json.dumps({"a": HOME}), where="test")
+    with pytest.raises(ScrubError, match="phone"):
+        assert_clean_artifact(json.dumps({"a": f"call {PHONE}"}), where="test")
+
+
+def test_the_artifact_gate_falls_back_to_raw_text_when_it_is_not_json() -> None:
+    """The non-JSON case is what the original check was written for."""
+
+    with pytest.raises(ScrubError, match="drive-path"):
+        assert_clean_artifact(r"open C:\temp\x.py", where="test")
+    assert_clean_artifact("回到 p2_user_new.py，北极海冰那一步怎么定？", where="test")
 
 
 def test_the_gate_catches_a_home_directory_that_survived_scrubbing() -> None:

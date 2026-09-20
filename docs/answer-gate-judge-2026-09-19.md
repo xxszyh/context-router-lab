@@ -17,7 +17,14 @@ the routing claim.
 | pairs | 18, judged in both orders = 36 calls |
 | cost | 26,672 in / 36,272 out judge tokens; 0 parse failures; 1 refusal-gate hit |
 
-Output: `.local/real-answer-judge-hybrid-vs-full-querylabels-2026-09-19.json` (clean, committable).
+Output: `.local/real-answer-judge-hybrid-vs-full-querylabels-2026-09-19.json`. It was recorded here
+as "clean, committable" on the day, and that was **not verified at the time** -- re-checked on
+2026-09-20 it tripped the export gate on the drive-path pattern, which turned out to be a false
+alarm in the gate rather than a leak in the file (the judge's arm label followed by a newline is
+stored as `A:\n`, which is character-for-character a Windows drive path). The file contains no
+path: one hit in the raw text, zero in the parsed values. The gate was fixed to read JSON at the
+layer its content lives in, and the claim holds under it. See
+`docs/documented-model-selection-2026-09-20.md`.
 
 ## The verdict, against the old-labels baseline
 
