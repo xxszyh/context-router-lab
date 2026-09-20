@@ -20,10 +20,11 @@ the routing claim.
 Output: `.local/real-answer-judge-hybrid-vs-full-querylabels-2026-09-19.json`. It was recorded here
 as "clean, committable" on the day, and that was **not verified at the time** -- re-checked on
 2026-09-20 it tripped the export gate on the drive-path pattern, which turned out to be a false
-alarm in the gate rather than a leak in the file (the judge's arm label followed by a newline is
-stored as `A:\n`, which is character-for-character a Windows drive path). The file contains no
-path: one hit in the raw text, zero in the parsed values. The gate was fixed to read JSON at the
-layer its content lives in, and the claim holds under it. See
+alarm in the gate rather than a leak in the file. The judge's arm label followed by a newline is
+stored as a letter, a colon and an escaped newline -- five characters that are, to a
+shape-matching pattern, indistinguishable from a Windows drive path. The file contains no path:
+one hit in the raw text, zero in the parsed values. The gate was fixed to read JSON at the layer
+its content lives in, and the claim holds under it. See
 `docs/documented-model-selection-2026-09-20.md`.
 
 ## The verdict, against the old-labels baseline

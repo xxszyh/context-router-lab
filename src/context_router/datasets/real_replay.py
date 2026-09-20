@@ -168,15 +168,17 @@ def assert_clean_artifact(text: str, *, where: str) -> None:
     """Gate a whole artifact, checking JSON at the layer its content actually lives in.
 
     `assert_clean` on serialised JSON reads escape sequences as data, and the drive-path pattern
-    cannot tell the two apart: in a judge transcript the arm label followed by a newline is
-    written `A:\\n`, which is character-for-character a Windows drive path. It fired on a judge
-    output that contains no path at all -- one hit in the raw text, zero in the parsed values.
+    cannot tell the two apart: in a judge transcript an arm label followed by a newline is stored
+    as a letter, a colon and an escaped newline, which is character-for-character a drive path.
+    It fired on a judge output containing no path at all -- one hit in the raw text, zero in the
+    parsed values.
 
     That is not a cosmetic false alarm. A gate that cries wolf on a clean artifact is a gate
     somebody switches off, and the next real leak goes through the hole it left. The fix is the
     same one `assert_no_machine_identity` already makes for shapes, applied to layers: check the
-    values the reader will see, not the encoding they are stored in. `json.loads` resolves `\\n`
-    back to a newline, `A:\\n` stops looking like a drive, and `C:\\\\Users` still does.
+    values the reader will see, not the encoding they are stored in. Parsing resolves the escape
+    back to a newline, so the arm label stops looking like a drive -- while a real home path,
+    whose backslashes are also escaped, still does not.
 
     Falls back to the raw text when the artifact is not JSON, which is the case the original
     check was written for.
