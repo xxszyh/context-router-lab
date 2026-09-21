@@ -43,9 +43,20 @@ stands on its own. If the index scores higher at equal tokens, then part of what
 routing win is really a formatting win, and the paper needs to say so.
 
 **Built, and measured offline.** On the 26 real checkpoints the selection is identical on all 26
-and the rendering is **3,074 memory tokens down to 1,823 -- 41% smaller**. The offline half is
+and the rendering is **43,712 memory tokens down to 16,376 -- 63% smaller**. The offline half is
 free and done; what is not done is sending both to a model, which is the only thing that can say
 whether the compressed form preserves the answer.
+
+The first version of this paragraph said 41%, and the error is worth recording because it is the
+failure class this repository's error log already names. It was measured against
+`.local/claude-conversations.sqlite`, which holds **zero contexts and zero assignments** -- so the
+router had no catalog to route to, selected almost nothing, and the numbers described a
+degenerate configuration rather than the arm. The answer experiments read
+`.local/real-answer-experiment.sqlite`, which carries the 8 contexts and 2,787 assignments the
+router actually routes over. Re-measured there, the saving is larger and the selection is still
+identical. A second measurement made on the same wrong database -- the share of the selection
+that is prose -- came out at 23% and 6 of 26 checkpoints; on the right one it is **52% and 25 of
+26**, so the wrong database did not merely rescale the answer, it inverted it.
 
 Two things had to be fixed to make it a real ablation rather than a second routing strategy, and
 both are recorded in the commit. The budget fit originally measured the *rendered* cost, so the
