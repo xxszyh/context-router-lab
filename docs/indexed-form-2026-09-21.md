@@ -22,29 +22,58 @@ This is the measurement of whether that 67% is free.
 the form does not cost quality and may buy some -- at two thirds fewer tokens. That is the
 outcome that makes the arm worth having.
 
-## The refusal stratum went the other way, and it is the second time
+## The refusal stratum went the other way -- and the reason is a broken label, not a mechanism
 
 | stratum | pairs | index | prose | order agreement |
 |---|---:|---:|---:|---:|
 | answerable | 22 | **5** | 2 | 0.77 |
 | `must_refuse` | 2 | 0 | **2** | **1.00** |
 
-Both refusal checkpoints went to the **prose** form, and the judge agreed with itself on both
-orders for both of them. Two pairs is nothing on its own. It is worth writing down because it is
-the second time this has happened from a different direction: the 2026-09-19 run, judging
-`hybrid_router` against `full_history`, also gave **both** `must_refuse` checkpoints to the arm
-with more context.
+Both refusal checkpoints went to the **prose** form, order-consistently. A first reading of this
+was that compression costs the ability to abstain, and it looked corroborated: the 2026-09-19
+run, judging `hybrid_router` against `full_history`, also gave both of these checkpoints to the
+arm with more context.
 
-A mechanism that would explain both: a truncated context still *looks* like there is material
-here, so the model engages and answers; a fuller context makes the insufficiency of the grounds
-visible, so it declines. If that is what is happening, then compression does not merely trade
-tokens for detail -- it specifically degrades the ability to say "I cannot tell from this".
+**That reading is wrong, and the answers say so.** Checking the refusal flags on the four
+answers behind the earlier result:
 
-**That is a hypothesis with two supporting observations of n = 2, not a finding.** The test that
-would settle it is cheap and named: take the checkpoints whose correct behaviour is to refuse,
-render the same selection at several head lengths, and see whether the refusal rate rises
-monotonically with the head. If it does, the head length is a calibration knob for abstention
-rather than a compression parameter, and that is a result in its own right.
+| checkpoint | `hybrid_router` | `full_history` | judged winner |
+|---|---|---|---|
+| `q-1227` | declines in substance, no cue | **refuses explicitly** | `full_history` |
+| `q-1370` | declines in substance | **engages** | `full_history` |
+
+On `q-1227` *both* arms declined and `full_history` still won; on `q-1370` *neither* refused and
+`full_history` still won. Refusal does not track the verdict in either direction. The same holds
+in this run: on `q-1227` the index arm is the one whose answer trips the refusal detector, and it
+lost.
+
+### What is actually going on
+
+The two checkpoints carry **contradictory labels**:
+
+| checkpoint | `must_abstain` | first `answer_requirement` |
+|---|---|---|
+| `q-1227` | **True** | 必须明确回答「pinn」能否用于该数模题，并给出适用性判断 |
+| `q-1370` | **True** | 必须明确回答能否用「comsol」辅助做题 |
+
+`must_abstain` says the correct behaviour is to decline. The requirements say the correct answer
+must clearly state whether the method can be used and must recommend it as an auxiliary check.
+The judge scores against the **requirements**, so it rewards the answer that engages, and the
+abstention label is unreachable by construction. The 2-0 is a judge preferring the more decisive
+answer, and the stratum is not measuring refusal at all.
+
+This is a real defect in the benchmark rather than a result about compression, and it is the
+second label problem found the same way -- by reading the answers instead of the tally. Which of
+the two labels is right is a judgement call that needs making: `q-1227` asks whether PINN is
+applicable, which is arguably answerable from method knowledge rather than from the conversation,
+in which case `must_abstain` is the wrong label; `q-1370` asks the same about COMSOL. Until that
+is settled the stratum should not be reported, and no conclusion about abstention should be drawn
+from it.
+
+The head-length sweep that was launched to test the abstention hypothesis is therefore testing
+something that does not exist as stated. Its coverage curve is still worth having -- it answers
+"how short can the head be before answers degrade" -- but its refusal counts are reported with
+this caveat or not at all.
 
 ## What the coverage number would have said
 
