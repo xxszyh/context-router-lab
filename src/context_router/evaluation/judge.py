@@ -130,7 +130,10 @@ class JudgePair(Contract):
     arm_b: str
     answer_a: str
     answer_b: str
-    must_abstain: bool = False
+    #: A refusal is the correct behaviour on this checkpoint. Named for the expectation rather
+    #: than for `must_abstain`, which the annotation protocol sets whenever the reference reply
+    #: drew on no labelled context -- including the `new_context` case where it answered anyway.
+    expects_refusal: bool = False
 
 
 class JudgeOutcome(Contract):
@@ -399,10 +402,14 @@ def summarise_judge_strata(
 ) -> dict[str, dict[str, dict[str, int | float | None]]]:
     """Separate benchmark intent from the answers' observed refusal behaviour.
 
-    ``must_abstain`` identifies checkpoints whose labelled behaviour is a refusal.  The
-    response strata independently show whether both, one or neither candidate actually
-    declined.  Reporting both prevents a refusal-heavy tie bucket from hiding the judge's
-    behaviour on answerable checkpoints.
+    ``expects_refusal`` identifies checkpoints where declining is the correct behaviour, which
+    is the annotation protocol's rule 1 and nothing else. It used to read ``must_abstain``, which
+    the protocol sets for rule 2 as well -- the `new_context` case where the reference reply drew
+    on no labelled context but answered anyway. Under that reading two checkpoints whose
+    requirements ask for a substantive answer were filed as failed refusals. The response strata
+    independently show whether both, one or neither candidate actually declined; reporting both
+    prevents a refusal-heavy tie bucket from hiding the judge's behaviour on answerable
+    checkpoints.
     """
 
     if len(pairs) != len(outcomes):
@@ -416,7 +423,7 @@ def summarise_judge_strata(
     for pair, outcome in zip(pairs, outcomes, strict=True):
         if pair.sample_id != outcome.sample_id:
             raise ValueError("pairs and outcomes must have matching sample ids")
-        checkpoint["must_refuse" if pair.must_abstain else "answerable"].append(outcome)
+        checkpoint["must_refuse" if pair.expects_refusal else "answerable"].append(outcome)
         refusal_count = int(is_refusal(pair.answer_a)) + int(is_refusal(pair.answer_b))
         response_key = ("neither_refuses", "one_refuses", "both_refuse")[refusal_count]
         response[response_key].append(outcome)

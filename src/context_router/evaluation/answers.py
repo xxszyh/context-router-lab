@@ -70,7 +70,17 @@ class AnswerRecord(Contract):
     #: fluent "I cannot tell from this" cannot pass as an answer by echoing the rubric.
     strict_coverage: float = Field(ge=0.0, le=1.0)
     refused: bool
+    #: Descriptive: the reference reply drew on none of the labelled contexts. Set by the
+    #: annotation protocol's rules 1 and 2, so it is true both for checkpoints where the reply
+    #: declined and for those where it answered from method knowledge instead. It is a slice of
+    #: the data, not a bar the arms have to clear.
     must_abstain: bool
+    #: Normative: a refusal is the correct behaviour here, which the protocol records as
+    #: `query_type == "unanswerable"` -- rule 1, where the reply itself declined. Only this
+    #: field should zero a score or separate a stratum; conflating it with `must_abstain` is
+    #: what made q-1227 and q-1370 look like failed refusals when their requirements ask for a
+    #: substantive answer.
+    expects_refusal: bool = False
     context_sha256: str
     truncated: bool
     latency_seconds: float = Field(ge=0.0)
@@ -106,7 +116,17 @@ def answer_one(
     # Real-replay schema 2.0 deliberately has no required-context label: its absence says
     # nothing about answerability. The benchmark already carries the explicit causal label,
     # so using required_context_ids here would classify every real query as unanswerable.
-    answerable = not case.must_abstain
+    #
+    # A refusal is expected only where the reference reply itself declined, which the annotation
+    # protocol records as `query_type == "unanswerable"` (its rule 1). `must_abstain` is set by
+    # rule 1 *and* rule 2, and rule 2 -- `new_context` -- is explicitly "reply_contexts is empty,
+    # reply does not decline": the reference answered from method knowledge and drew on none of
+    # the labelled contexts. Reading that as a requirement to refuse zeroes the score of a good
+    # answer, which is exactly what happened to q-1227 and q-1370 -- both `new_context`, both
+    # carrying requirements that ask for a substantive answer, both scored as if they should have
+    # declined. `must_abstain` stays on the record because "the reference drew on no context" is
+    # a real slice of the data; it just is not a bar the arms have to clear.
+    answerable = case.query_type != "unanswerable"
     return AnswerRecord(
         arm=arm,
         sample_id=case.sample_id,
@@ -123,6 +143,7 @@ def answer_one(
         strict_coverage=coverage if (answerable or not refused) else 0.0,
         refused=refused,
         must_abstain=case.must_abstain,
+        expects_refusal=case.query_type == "unanswerable",
         context_sha256=hashlib.sha256(built.rendered_text.encode("utf-8")).hexdigest()[:16],
         truncated=result.stop_reason in TRUNCATION_STOP_REASONS,
         latency_seconds=latency,

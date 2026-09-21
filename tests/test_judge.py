@@ -261,7 +261,7 @@ def test_summary_reports_unmeasured_agreement_as_none() -> None:
 def test_judge_summary_separates_checkpoint_and_response_refusal_strata() -> None:
     pairs = [
         pair("无法回答。", "No information is available.").model_copy(
-            update={"sample_id": "must-refuse", "must_abstain": True}
+            update={"sample_id": "must-refuse", "expects_refusal": True}
         ),
         pair("无法回答。", BETTER).model_copy(update={"sample_id": "one-refusal"}),
         pair(BETTER, WORSE).model_copy(update={"sample_id": "no-refusal"}),

@@ -480,16 +480,19 @@ def judge_answers_command(
     for sample_id, arms in by_sample.items():
         if arm_a in arms and arm_b in arms:
             left, right = arms[arm_a], arms[arm_b]
-            if "must_abstain" not in left or "must_abstain" not in right:
+            # Read from `expects_refusal`, not `must_abstain`: the latter is set whenever the
+            # reference reply drew on no labelled context, which includes the case where it
+            # answered anyway. Older run files predate the field and carry no refusal
+            # expectation, which is the correct default for them -- no real checkpoint in this
+            # dataset is `unanswerable`.
+            left_expects = left.get("expects_refusal", False)
+            right_expects = right.get("expects_refusal", False)
+            if not isinstance(left_expects, bool) or not isinstance(right_expects, bool):
+                raise typer.BadParameter(f"{sample_id}: expects_refusal labels must be boolean")
+            if left_expects != right_expects:
                 raise typer.BadParameter(
-                    f"{sample_id}: both arms need an explicit boolean must_abstain label"
+                    f"{sample_id}: expects_refusal labels disagree between arms"
                 )
-            left_must_abstain = left["must_abstain"]
-            right_must_abstain = right["must_abstain"]
-            if not isinstance(left_must_abstain, bool) or not isinstance(right_must_abstain, bool):
-                raise typer.BadParameter(f"{sample_id}: must_abstain labels must be boolean")
-            if left_must_abstain != right_must_abstain:
-                raise typer.BadParameter(f"{sample_id}: must_abstain labels disagree between arms")
             pairs.append(
                 JudgePair(
                     sample_id=sample_id,
@@ -499,7 +502,7 @@ def judge_answers_command(
                     arm_b=arm_b,
                     answer_a=left["answer"],
                     answer_b=right["answer"],
-                    must_abstain=left_must_abstain,
+                    expects_refusal=left_expects,
                 )
             )
         if len(pairs) >= limit:
@@ -536,7 +539,7 @@ def judge_answers_command(
     )
     outcomes = run_pairwise_judging(judge, pairs, swap=True)
     answerable_outcomes = [
-        outcome for pair, outcome in zip(pairs, outcomes, strict=True) if not pair.must_abstain
+        outcome for pair, outcome in zip(pairs, outcomes, strict=True) if not pair.expects_refusal
     ]
     tally = summarise_wins(answerable_outcomes)
     strata = summarise_judge_strata(pairs, outcomes)

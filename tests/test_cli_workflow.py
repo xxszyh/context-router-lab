@@ -78,7 +78,7 @@ def test_judge_answers_applies_the_double_refusal_gate_by_default(tmp_path: Path
                         "query": "What happened?",
                         "answer_requirements": ["Explain the implementation"],
                         "answer": "上下文不足，无法回答。",
-                        "must_abstain": True,
+                        "expects_refusal": True,
                     },
                     {
                         "sample_id": "s-01",
@@ -86,7 +86,7 @@ def test_judge_answers_applies_the_double_refusal_gate_by_default(tmp_path: Path
                         "query": "What happened?",
                         "answer_requirements": ["Explain the implementation"],
                         "answer": "There is not enough information to answer.",
-                        "must_abstain": True,
+                        "expects_refusal": True,
                     },
                 ]
             },
@@ -116,7 +116,7 @@ def test_judge_answers_applies_the_double_refusal_gate_by_default(tmp_path: Path
     assert payload["judged_pairs"] == 0
     assert payload["outcomes"][0]["winner"] == "tie"
     assert payload["outcomes"][0]["agreement"] is None
-    assert payload["tally"] == {}, "the primary table excludes must-refuse checkpoints"
+    assert payload["tally"] == {}, "the primary table excludes checkpoints that expect a refusal"
     assert "overall_tally" not in payload, "refusal checkpoints must not re-enter a mixed table"
     assert payload["strata"]["checkpoint"]["must_refuse"]["pairs"] == 1
     assert payload["strata"]["checkpoint"]["must_refuse"]["judged_pairs"] == 0
@@ -124,7 +124,11 @@ def test_judge_answers_applies_the_double_refusal_gate_by_default(tmp_path: Path
     assert payload["strata"]["response"]["both_refuse"]["pairs"] == 1
 
 
-def test_judge_answers_rejects_missing_or_inconsistent_abstain_labels(tmp_path: Path) -> None:
+def test_judge_answers_rejects_arms_that_disagree_about_the_refusal_expectation(
+    tmp_path: Path,
+) -> None:
+    """Both arms answer the same checkpoint, so they cannot disagree about what it expects."""
+
     answers = tmp_path / "answers.json"
     answers.write_text(
         json.dumps(
@@ -136,7 +140,7 @@ def test_judge_answers_rejects_missing_or_inconsistent_abstain_labels(tmp_path: 
                         "query": "q",
                         "answer_requirements": ["r"],
                         "answer": "a",
-                        "must_abstain": True,
+                        "expects_refusal": True,
                     },
                     {
                         "sample_id": "s-01",
@@ -144,7 +148,7 @@ def test_judge_answers_rejects_missing_or_inconsistent_abstain_labels(tmp_path: 
                         "query": "q",
                         "answer_requirements": ["r"],
                         "answer": "b",
-                        "must_abstain": False,
+                        "expects_refusal": False,
                     },
                 ]
             }
@@ -158,14 +162,51 @@ def test_judge_answers_rejects_missing_or_inconsistent_abstain_labels(tmp_path: 
     )
 
     assert result.exit_code != 0
-    assert "must_abstain labels disagree" in result.output
+    assert "expects_refusal labels disagree" in result.output
 
-    payload = json.loads(answers.read_text(encoding="utf-8"))
-    del payload["records"][1]["must_abstain"]
-    answers.write_text(json.dumps(payload), encoding="utf-8")
-    missing = runner.invoke(
+
+def test_a_record_without_the_refusal_expectation_defaults_to_not_expecting_one(
+    tmp_path: Path,
+) -> None:
+    """Absence must not be read as an expectation, or every older run file becomes a refusal.
+
+    The field was added on 2026-09-21, so every answer file written before it lacks one. The
+    safe default is the one that is true of the data: no checkpoint in this dataset is
+    `unanswerable`, so no checkpoint expects a refusal. Defaulting the other way would file the
+    whole benchmark under a stratum that has no members.
+    """
+
+    answers = tmp_path / "answers.json"
+    answers.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "sample_id": "s-01",
+                        "arm": "hybrid_router",
+                        "query": "q",
+                        "answer_requirements": ["r"],
+                        "answer": "a",
+                    },
+                    {
+                        "sample_id": "s-01",
+                        "arm": "query_recent_only",
+                        "query": "q",
+                        "answer_requirements": ["r"],
+                        "answer": "b",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
         app,
         ["judge-answers", str(answers), str(tmp_path / "judge.json"), "--judge", "coverage"],
     )
-    assert missing.exit_code != 0
-    assert "need an explicit boolean must_abstain label" in missing.output
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads((tmp_path / "judge.json").read_text(encoding="utf-8"))
+    assert payload["strata"]["checkpoint"]["must_refuse"]["pairs"] == 0
+    assert payload["strata"]["checkpoint"]["answerable"]["pairs"] == 1
