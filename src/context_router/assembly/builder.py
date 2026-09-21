@@ -110,11 +110,16 @@ class ContextBuilder:
         analyzer: LexicalAnalyzer | None = None,
         token_counter: TokenCounter | None = None,
         render_mode: RenderMode = "prose",
+        index_head_chars: int = INDEX_HEAD_CHARS,
     ) -> None:
         self.analyzer = analyzer or LexicalAnalyzer()
         self.token_counter = token_counter or TokenCounter()
         self.embedding = HashEmbeddingProvider(analyzer=self.analyzer)
         self.render_mode: RenderMode = render_mode
+        #: Sweepable, because how much of a body survives is the parameter that decides what the
+        #: indexed form can still support -- including whether the model can tell that its
+        #: grounds are insufficient.
+        self.index_head_chars = index_head_chars
 
     def assemble(self, request: AssemblyRequest, decision: RouteDecision) -> WorkingContext:
         selected = list(dict.fromkeys(decision.selected_context_ids))
@@ -440,8 +445,8 @@ class ContextBuilder:
 
         event = block.event
         head = " ".join(event.content.split())
-        if len(head) > INDEX_HEAD_CHARS:
-            head = head[:INDEX_HEAD_CHARS] + "…"
+        if len(head) > self.index_head_chars:
+            head = head[: self.index_head_chars] + "…"
         return (
             f"[{index}] {block.section} ctx={block.context_id} seq={event.sequence} "
             f"{event.actor}/{event.kind}: {head}"
@@ -450,6 +455,8 @@ class ContextBuilder:
 
 _DEFAULT_BUILDER = ContextBuilder()
 _INDEXED_BUILDER = ContextBuilder(render_mode="index")
+#: Builders are cached by head length so a sweep reuses them instead of rebuilding per call.
+_INDEXED_BUILDERS: dict[int, ContextBuilder] = {INDEX_HEAD_CHARS: _INDEXED_BUILDER}
 
 
 def assemble_context(request: AssemblyRequest, decision: RouteDecision) -> WorkingContext:
@@ -458,13 +465,28 @@ def assemble_context(request: AssemblyRequest, decision: RouteDecision) -> Worki
     return _DEFAULT_BUILDER.assemble(request, decision)
 
 
-def assemble_indexed_context(request: AssemblyRequest, decision: RouteDecision) -> WorkingContext:
+def assemble_indexed_context(
+    request: AssemblyRequest,
+    decision: RouteDecision,
+    *,
+    head_chars: int | None = None,
+) -> WorkingContext:
     """Assemble the same working set, rendered as an index rather than as prose.
 
     Identical selection and identical events in identical order; only the form changes. It takes
     the same `RouteDecision` as `assemble_context` on purpose, so a caller can hold the routing
     fixed and vary the rendering -- which is the only way to tell a routing win from a formatting
     one.
+
+    `head_chars` overrides how much of each body survives. It is the knob a sweep turns, and the
+    selection does not depend on it: the budget fit measures the prose cost, so varying the head
+    varies the rendering and nothing else.
     """
 
-    return _INDEXED_BUILDER.assemble(request, decision)
+    if head_chars is None:
+        return _INDEXED_BUILDER.assemble(request, decision)
+    if head_chars not in _INDEXED_BUILDERS:
+        _INDEXED_BUILDERS[head_chars] = ContextBuilder(
+            render_mode="index", index_head_chars=head_chars
+        )
+    return _INDEXED_BUILDERS[head_chars].assemble(request, decision)

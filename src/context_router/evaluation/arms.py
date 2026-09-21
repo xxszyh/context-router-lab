@@ -530,11 +530,15 @@ def assemble_arm(
     *,
     counter: TokenCounter | None = None,
     router: ContextRouter | None = None,
+    index_head_chars: int | None = None,
 ) -> ArmAssembly:
     """Build the memory one arm would show the main model for one checkpoint.
 
     ``router`` lets the hybrid arm report its *configured* performance, so a trained ranker
     or a tuned policy can be measured instead of only the defaults.
+
+    ``index_head_chars`` applies to ``indexed_router`` only and changes how much of each body
+    survives. It does not change the selection, which is what makes it safe to sweep.
     """
 
     tokens = counter or TokenCounter()
@@ -629,7 +633,7 @@ def assemble_arm(
     # router, same decision, same events, same order. Holding the selection fixed is the point
     # -- it is what makes the pair an ablation of *form* rather than a second routing strategy.
     assembled = (
-        assemble_indexed_context(request, decision)
+        assemble_indexed_context(request, decision, head_chars=index_head_chars)
         if name == "indexed_router"
         else assemble_context(request, decision)
     )
@@ -649,10 +653,15 @@ def run_arm(
     *,
     counter: TokenCounter | None = None,
     router: ContextRouter | None = None,
+    index_head_chars: int | None = None,
 ) -> ArmCaseResult:
     """Score a single comparison arm on a single checkpoint."""
 
-    return _result(name, case, assemble_arm(name, case, counter=counter, router=router))
+    return _result(
+        name,
+        case,
+        assemble_arm(name, case, counter=counter, router=router, index_head_chars=index_head_chars),
+    )
 
 
 def evaluate_arms(results: list[ArmCaseResult]) -> dict[str, dict[str, float]]:

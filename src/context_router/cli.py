@@ -345,6 +345,13 @@ def answer_experiment_command(
     auth_style: Annotated[str, typer.Option(help="bearer or x-api-key")] = "bearer",
     max_tokens: Annotated[int, typer.Option(min=64)] = 800,
     token_budget: Annotated[int, typer.Option(min=32)] = 2048,
+    index_head_chars: Annotated[
+        int | None,
+        typer.Option(
+            min=1,
+            help="Body characters the indexed arm keeps per event; it does not change selection",
+        ),
+    ] = None,
     ranker_file: Annotated[Path | None, typer.Option()] = None,
     policy_file: Annotated[Path | None, typer.Option()] = None,
 ) -> None:
@@ -387,7 +394,13 @@ def answer_experiment_command(
     for index, case in enumerate(cases, start=1):
         for name in chosen:
             try:
-                record = answer_one(case, cast(ArmName, name), provider, router=router)
+                record = answer_one(
+                    case,
+                    cast(ArmName, name),
+                    provider,
+                    router=router,
+                    index_head_chars=index_head_chars,
+                )
             except Exception as error:  # noqa: BLE001 - one failed call must not lose the run
                 typer.echo(f"  [{index}/{len(cases)}] {name} FAILED: {type(error).__name__}")
                 response = getattr(error, "response", None)

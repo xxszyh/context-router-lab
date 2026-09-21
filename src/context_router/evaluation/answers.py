@@ -83,15 +83,19 @@ def answer_one(
     *,
     instructions: str = DEFAULT_INSTRUCTIONS,
     router: ContextRouter | None = None,
+    index_head_chars: int | None = None,
 ) -> AnswerRecord:
     """Assemble one arm's context for one checkpoint and ask the model to answer it.
 
     The memory is built by ``assemble_arm`` rather than here, so the answer experiment
     sends exactly what the routing benchmark scored. Budgeting the two separately is how a
     harness ends up measuring something other than the thing it reports.
+
+    ``index_head_chars`` applies to ``indexed_router`` only; it changes the rendering, not the
+    selection, which is what makes a sweep over it a sweep over one variable.
     """
 
-    built = assemble_arm(arm, case, router=router)
+    built = assemble_arm(arm, case, router=router, index_head_chars=index_head_chars)
     started = time.perf_counter()
     result = provider.answer(
         query=case.query, working_context=built.rendered_text, instructions=instructions

@@ -146,6 +146,37 @@ def test_the_indexed_form_costs_no_more_than_the_prose_it_replaces(
         assert index.memory_tokens <= prose.memory_tokens, case.sample_id
 
 
+def test_the_head_length_changes_the_rendering_and_not_the_selection(
+    cases: list[ArmCase],
+) -> None:
+    """A sweep over the head is a sweep over one variable, and that is the whole point of it.
+
+    The refusal hypothesis is tested by rendering the same selection at several head lengths and
+    watching the refusal rate. That reading is only valid while the selection is identical at
+    every point -- if a shorter head changed which events were admitted, a change in refusal
+    could be the content rather than the truncation, and nothing in the result would say which.
+    """
+
+    heads = (40, 160, 640)
+    for case in cases:
+        rendered = {
+            head: assemble_arm("indexed_router", case, index_head_chars=head) for head in heads
+        }
+        reference = rendered[160]
+        for head, assembly in rendered.items():
+            assert assembly.selected_context_ids == reference.selected_context_ids, (
+                case.sample_id,
+                head,
+            )
+            assert assembly.included_event_ids == reference.included_event_ids, (
+                case.sample_id,
+                head,
+            )
+        # A larger head can only ever keep more text, so the cost is monotonic in it.
+        costs = [rendered[head].memory_tokens for head in heads]
+        assert costs == sorted(costs), (case.sample_id, costs)
+
+
 def test_a_short_turn_falls_back_to_prose_rather_than_growing(cases: list[ArmCase]) -> None:
     """The indexed form is a compression, so it must never expand.
 
