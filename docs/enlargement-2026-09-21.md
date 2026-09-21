@@ -60,6 +60,25 @@ That is the difference between "a direction the sample cannot turn into a magnit
 number. It is also a few hours of labelling per conversation, which is why it has not happened
 yet.
 
+## Two things a new conversation runs into
+
+**The importer stores harness-injected blocks as user messages.** The sea-ice conversation's
+store holds nine angle-bracket blocks that the user never typed -- `<task-notification>` (the
+harness reporting a background job), `<command-message>`, `<local-command-caveat>`. They arrive
+with `actor="user"`, `kind="message"`, so anything that selects "the user's turns" picks them up:
+the first version of the checkpoint worksheet listed three of them as queries.
+
+They are in the published dataset's session too -- **18** of them -- and **none of the 26
+checkpoints sits on one**, so the published set is not contaminated. The annotation excluded them
+by hand. Any new conversation has to exclude them the same way, and a filter that keys on the
+first character being `<` is enough. Both counts are in the store, so this was checked rather
+than assumed.
+
+**Near-duplicates survive exact matching.** The same question arrives twice after an
+interruption, or three times with slightly different tails, and only differs by the paths pasted
+into it. Deduplicating on exact text missed five of them. Fingerprinting by stripping paths and
+whitespace before comparing caught them.
+
 ## What was built
 
 A **context-catalog draft** for `139471e7`, at the local annotation folder (not committed: real
