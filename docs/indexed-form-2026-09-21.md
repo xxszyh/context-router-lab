@@ -105,8 +105,37 @@ arm exists to test.
 curve is not monotone -- 40 scores above 80 and 160, then coverage jumps between 160 and 320 --
 which is what a noisy lexical measure looks like, and 22 checkpoints cannot separate differences
 of this size. Coverage rewards an answer that names more of the right nouns, and a longer answer
-names more of them; that is exactly the failure caught on `q-0801` below. So the curve motivates
-a judged comparison, and does not substitute for one. It has been run for the 320 point.
+names more of them; that is exactly the failure caught on `q-0801` below.
+
+### The judged comparison was run, and it refutes the curve
+
+| | head 160 | head 320 |
+|---|---|---|
+| judge: `indexed_router` vs prose | **5-2** | **3-6** |
+| coverage: index vs prose | 0.278 vs 0.299 | **0.326** vs 0.270 |
+| mean memory tokens | 660 vs 1,625 | 808 vs 1,605 |
+
+**Coverage points the opposite way from the judge in both runs.** At 160 the compressed form
+scored *lower* coverage and *won*; at 320 it scored *higher* coverage and *lost*. The coverage
+gain the sweep found was verbosity, exactly as the `q-0801` case predicted, and the sweep's
+reading of 320 as the best point is refuted.
+
+Across the two judged runs the forms are a dead heat: **8 wins each on 16 decided pairs, with 27
+ties.** The honest conclusion is that the form is not measurably load-bearing at either head
+length, and the 51-67% token saving is therefore not being paid for in answer quality.
+
+The caveat is the instrument. Order agreement was 0.77 and 0.75, and 27 of 43 pairs tied -- a
+real difference smaller than roughly a fifth of pairs would be invisible to a judge that
+disagrees with itself this often. "Not measurable" is the claim; "no difference" is not.
+
+**The default stays at 160.** The judge cannot separate the head lengths, and 320 costs 22% more
+memory tokens for no measurable gain, so the cheaper point is the one to keep. Changing it on the
+strength of the coverage curve would have been changing it on the strength of the measure this
+comparison just refuted.
+
+The `must_refuse` stratum split 1-1 at head 320, having gone 0-2 and 2-0 in the two earlier runs.
+Three runs, three different answers, from a stratum whose labels contradict each other -- which is
+the clearest possible statement that it should not be reported until that is resolved.
 
 ## What the coverage number would have said
 
