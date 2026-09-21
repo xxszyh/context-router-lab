@@ -77,24 +77,22 @@ still a private proxy alias.* → `docs/answer-gate-judge-2026-09-19.md`.*
 
 ## Not established
 
-**Answer quality, in magnitude.** Still not publishable, but the reason moved. The 2026-09-18
-verdict ("judge 82% consistent, decided 3 of 16, nothing publishable") was a property of labels
-written from the original answer; on 2026-09-19 those labels were replaced with a query-derived
-set and a free control now separates the arms (see **8**). What remains unmeasured is the
-**paid blinded judge on the new labels** — the one number the quality half needs. n = 20.
-→ `docs/real-answer-gate-2026-09-18.md` (the old result) and
-`docs/query-derived-labels-2026-09-19.md` (the reopened gate).
+**Answer quality, in magnitude.** The measurement now exists and it is too small to be a
+magnitude. On the documented-model run a blinded judge puts `hybrid_router` ahead of
+`query_recent_only` **6-2 with 14 ties** — the first quality measure that favours routing — but
+8 decided pairs at 71% order agreement is not a magnitude, and 61% of pairs tied. Stated as a
+direction only. → `docs/answer-gate-documented-model-2026-09-20.md`.
 
-**Anything about a documented model.** Every *existing* call-based number used
-`deepseek-v4.1-flash` through a private Anthropic-compatible proxy. The alias is not reproducible
-by anyone else and the operator can change what it resolves to. Marked as such in the README and
-in `answer-quality-experiment.md`.
+**Anything about a documented model.** Every *older* call-based number used `deepseek-v4.1-flash`
+through a private Anthropic-compatible proxy. The alias is not reproducible by anyone else and
+the operator can change what it resolves to. Marked as such in the README and in
+`answer-quality-experiment.md`.
 
-The selection half of this is now done — `kimi-k2.5` and `qwen3-max` are publicly documented
-names served on `anthropic:messages`, and both were verified to read a long prompt faithfully
-(a planted marker recovered at 25%, 50% and 75% depth of a 130k-token prompt, so the earlier
-`input_tokens=13` reading was a broken usage report rather than silent truncation). What is not
-established is a **result** under one: the re-run is measured, not yet judged.
+That is now resolved: `kimi-k2.5` and `qwen3-max` are publicly documented names served on
+`anthropic:messages`, and both were verified to read a long prompt faithfully (a planted marker
+recovered at 25%, 50% and 75% depth of a 130k-token prompt, so the earlier `input_tokens=13`
+reading was a broken usage report rather than silent truncation). The re-run under `kimi-k2.5`
+is the first result in this project that rests on a documented model.
 → `docs/documented-model-selection-2026-09-20.md`.
 
 **The real-replay routing gates.** See blockers.
@@ -186,7 +184,15 @@ results.
    flatter routing, and still underpowered. → `docs/answer-gate-judge-2026-09-19.md`.
    **Outstanding: re-run under a documented fixed model (the gateway exposes many), then enlarge
    the sample with the 6 labelled-but-unrun checkpoints.**
-6. **Choosing the documented model, and what it costs the comparison** — **done, and it
+6. **The whole gate re-run under a documented model, on all 24 checkpoints** — **done, and it
+   is the first result that rests on a public model name.** `full_history` ran on **5 of 24**
+   and failed the other 19 with HTTP 400 context refusals — 79%, against the 10% the 1M proxy
+   alias reported. The judged pair is `hybrid_router` vs `query_recent_only`, the only pair
+   both arms run everywhere: **6-2 with 14 ties**, 71% order agreement. A direction, not a
+   magnitude. One answer quoted an absolute path, so the judge transcript inherited the user
+   name — a judge output is a derived artifact and must be gated by value like any other.
+   → `docs/answer-gate-documented-model-2026-09-20.md`.
+7. **Choosing the documented model, and what it costs the comparison** — **done, and it
    reshapes the gate.** `minimax-m3` was the only documented candidate advertising the 1M the
    `full_history` arm needs; it reads a 20k prompt fine but at 500k returns a *garbled* marker,
    an empty content block and raw filler, so its advertised window is not usable. Under the two
