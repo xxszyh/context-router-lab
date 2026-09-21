@@ -70,7 +70,7 @@ own wording) and discrimination (off-diagonal 0.058). A free coverage-judge cont
 labels splits `hybrid_router` from `full_history` **9–2, 6 ties** — the separation the old set
 could not produce. The diagonal's drop from 1.000 to 0.342 is the point: the old set was scoring
 itself. **The paid judge has now run on the new labels: the arms separate, but the direction
-favours `full_history` 5–2 with 9 ties, and at n=18 / 82% judge agreement that is a signal, not
+favours `full_history` 7–2 with 9 ties, and at n=18 / 82% judge agreement that is a signal, not
 a conclusion. The coverage control and the paid judge now disagree on direction on real data --
 the concrete case for never reporting coverage as quality.** *Grade: exact tally; the model is
 still a private proxy alias.* → `docs/answer-gate-judge-2026-09-19.md`.*
@@ -79,8 +79,8 @@ still a private proxy alias.* → `docs/answer-gate-judge-2026-09-19.md`.*
 
 **Answer quality, in magnitude.** The measurement now exists and it is too small to be a
 magnitude. On the documented-model run a blinded judge puts `hybrid_router` ahead of
-`query_recent_only` **6-2 with 14 ties** — the first quality measure that favours routing — but
-8 decided pairs at 71% order agreement is not a magnitude, and 61% of pairs tied. Stated as a
+`query_recent_only` **6-3 with 15 ties** — the first quality measure that favours routing — but
+9 decided pairs at 71% order agreement is not a magnitude, and 63% of pairs tied. Stated as a
 direction only. → `docs/answer-gate-documented-model-2026-09-20.md`.
 
 **Anything about a documented model.** Every *older* call-based number used `deepseek-v4.1-flash`
@@ -188,7 +188,7 @@ results.
    is the first result that rests on a public model name.** `full_history` ran on **5 of 24**
    and failed the other 19 with HTTP 400 context refusals — 79%, against the 10% the 1M proxy
    alias reported. The judged pair is `hybrid_router` vs `query_recent_only`, the only pair
-   both arms run everywhere: **6-2 with 14 ties**, 71% order agreement. A direction, not a
+   both arms run everywhere: **6-3 with 15 ties**, 71% order agreement. A direction, not a
    magnitude. One answer quoted an absolute path, so the judge transcript inherited the user
    name — a judge output is a derived artifact and must be gated by value like any other.
    → `docs/answer-gate-documented-model-2026-09-20.md`.

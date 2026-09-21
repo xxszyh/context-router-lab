@@ -26,13 +26,17 @@ against recency-selection at comparable budget, the only pair where both arms ru
 
 | | wins | losses | ties | order agreement |
 |---|---:|---:|---:|---:|
-| `hybrid_router` | **6** | 2 | 14 | 0.71 |
-| `query_recent_only` | 2 | **6** | 14 | 0.71 |
+| `hybrid_router` | **6** | 3 | 15 | 0.71 |
+| `query_recent_only` | 3 | **6** | 15 | 0.71 |
 
-23 pairs judged of 24 (one pair was tied by the refusal gate before any call). 0 parse failures.
+24 pairs, 23 judged (one was tied by the refusal gate before any call), 0 parse failures.
 
-By stratum: on the 21 answerable pairs `hybrid_router` takes 6-2; on the 2 `must_refuse` pairs it
-takes 0-1. That second number is a single pair and carries nothing.
+There is no refusal stratum to report. Two checkpoints (`q-1227`, `q-1370`) were being filed as
+`must_refuse` until 2026-09-21, when the label was found to mean "the reference reply drew on no
+labelled context" rather than "a refusal is expected" -- both are `new_context`, and both carry
+requirements that ask for a substantive answer. They are back in the main tally, which moves the
+result from 6-2 with 14 ties to **6-3 with 15 ties**. The direction is unchanged.
+→ `docs/indexed-form-2026-09-21.md`.
 
 ## What this does and does not say
 
@@ -44,18 +48,19 @@ anyway). This is the first one where the selective arm comes out ahead.
 **It does not say routing preserves quality, and it does not give a magnitude.** Three reasons,
 all visible above:
 
-1. **14 of 23 pairs are ties.** The judge could not separate the arms in 61% of pairs. The
+1. **15 of 24 pairs are ties.** The judge could not separate the arms in 63% of pairs. The
    comparison is not "routing answers better"; it is "routing answers no worse often enough that
    a judge finds a difference in a minority of cases".
 2. **The judge disagrees with itself more than it did.** Order agreement fell to **0.71** from
-   0.82 on 2026-09-19 -- the same protocol, a different model. On 8 decided pairs, 6-2 is not
-   distinguishable from a coin (two-sided p ~ 0.29). The instrument is noisier than the effect.
-3. **The strata are thin.** The `must_refuse` stratum, where a router's failure mode would show
-   most clearly, is 2 pairs.
+   0.82 on 2026-09-19 -- the same protocol, a different model. On 9 decided pairs, 6-3 is not
+   distinguishable from a coin (two-sided p ~ 0.51). The instrument is noisier than the effect.
+3. **The strata are thin.** There is no refusal stratum left to read: the two checkpoints that
+   were filed as one belong in the main tally, and no checkpoint in this dataset is
+   `unanswerable`.
 
 The honest statement is: **routing cuts tokens by roughly 221x, never fails to run where
 `full_history` fails 79% of the time, and on the one comparison both arms can run, a blinded
-judge finds routing ahead 6-2 with 14 ties -- a direction that the sample cannot turn into a
+judge finds routing ahead 6-3 with 15 ties -- a direction that the sample cannot turn into a
 magnitude.**
 
 ## A defect in the instrument, found on the way
@@ -79,4 +84,4 @@ which is now fixed -- see the commit that added `assert_clean_artifact`.
 
 The measurement is now possible under a documented model, which was the blocker. What it needs
 is sample, not another re-run: the 6 labelled checkpoints that never entered a gate, and more
-real conversations, raise the 8 decided pairs toward a number that can carry a direction.
+real conversations, raise the 9 decided pairs toward a number that can carry a direction.

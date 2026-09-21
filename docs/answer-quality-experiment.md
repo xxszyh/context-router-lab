@@ -32,10 +32,19 @@ The result JSON also reports two independent strata: labelled checkpoint intent
 `one_refuses` / `both_refuse`). This completes the reporting change requested below without
 collapsing "the benchmark expected a refusal" into "the model happened to refuse". The
 primary `tally` now covers answerable checkpoints only; must-refuse outcomes remain in their
-own stratum instead of any mixed total. Both arms must carry the same boolean
-`must_abstain` label, or the CLI stops instead of silently classifying the checkpoint as
-answerable. A stratum with no actual judge calls reports `order_agreement: null` alongside
-`judged_pairs: 0`, distinguishing unmeasured agreement from zero agreement.
+own stratum instead of any mixed total. Both arms must carry the same boolean label, or the
+CLI stops instead of silently classifying the checkpoint as answerable. A stratum with no
+actual judge calls reports `order_agreement: null` alongside `judged_pairs: 0`,
+distinguishing unmeasured agreement from zero agreement.
+
+**The intent stratum was keyed on the wrong label until 2026-09-21.** It read `must_abstain`,
+which the annotation protocol sets both for checkpoints where the reference reply declined
+(rule 1, `unanswerable`) and for those where it drew on no labelled context and answered anyway
+(rule 2, `new_context`). Only rule 1 expects a refusal. The stratum now keys on
+`query_type == "unanswerable"`, carried on the record as `expects_refusal`, and a record without
+that field defaults to not expecting one. **No checkpoint in the real dataset is `unanswerable`,
+so the `must_refuse` stratum is currently empty** -- which is the honest state, and the reason
+three earlier runs appeared to disagree about it. → `docs/indexed-form-2026-09-21.md`.
 
 This is an implementation result, not a new empirical row in the tables. The original
 `answers.json` and private-provider credentials were not retained in the current workspace,

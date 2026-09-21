@@ -33,6 +33,15 @@ its content lives in, and the claim holds under it. See
 |---|---:|---:|---:|---:|---:|---:|
 | old labels (2026-09-18) | 18 | 17 | 14 | **14** | 0 | 3 |
 | **new labels (2026-09-19)** | 18 | 17 | 14 | **9** | 2 | 5 |
+| new labels, re-counted | 18 | 17 | 14 | 9 | 2 | **7** |
+
+The last row is a correction made on 2026-09-21, not a re-run. Two checkpoints (`q-1227`,
+`q-1370`) were being held out of the tally as `must_refuse`, a label that was being read as "a
+refusal is expected" when the annotation protocol uses it for the case where the reference reply
+drew on no labelled context and *answered anyway*. They belong in the main tally, and both went
+to `full_history`, which widens its lead from 5-2 to 7-2. No conclusion here changes -- the
+direction was already the uncomfortable one -- but the numbers do.
+→ `docs/indexed-form-2026-09-21.md`.
 
 Two things are true at once, and both matter.
 
@@ -54,6 +63,14 @@ correct behaviour is to decline from insufficient grounds, and they are the ques
 is *most* supposed to get right cheaply. That `full_history` took both says the selective arm is
 not yet declining when it should, or is declining when it should engage. At n = 2 this is a
 pointer, not a finding, but it is the sharpest pointer in the run.
+
+> **Retracted on 2026-09-21.** There is no such stratum. Both checkpoints are `new_context`:
+> the reference reply drew on no labelled context and *answered anyway*, which the annotation
+> protocol also marks `must_abstain`. Reading that as "a refusal is expected" made a provenance
+> label into a behavioural requirement. The answers do not support the mechanism either -- on
+> `q-1227` both arms declined and `full_history` still won, and on `q-1370` neither declined. The
+> two are back in the main tally, which moves this run from 5-2 to 7-2. The paragraph above is
+> kept because the wrong reading is the instructive part. → `docs/indexed-form-2026-09-21.md`.
 
 ## The two instruments now disagree on direction, and that is the honest headline
 

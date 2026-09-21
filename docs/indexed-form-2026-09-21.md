@@ -11,28 +11,28 @@ This is the measurement of whether that 67% is free.
 
 | | wins | losses | ties | order agreement |
 |---|---:|---:|---:|---:|
-| `indexed_router` | **5** | 2 | 15 | 0.77 |
-| `hybrid_router` | 2 | **5** | 15 | 0.77 |
+| `indexed_router` | **5** | 4 | 15 | 0.77 |
+| `hybrid_router` | 4 | **5** | 15 | 0.77 |
 
 24 pairs, all judged, 1 parse failure. Offline, the lexical coverage moved from 0.299 to 0.278
 -- up on 3 checkpoints, down on 6, unchanged on 15.
 
-**On the 22 answerable checkpoints the compressed form is ahead 5-2.** Seven decided pairs at
-77% order agreement is not a magnitude, and 15 of 24 pairs tied, so the honest reading is that
-the form does not cost quality and may buy some -- at two thirds fewer tokens. That is the
-outcome that makes the arm worth having.
+**The compressed form is ahead 5-4 across all 24 pairs.** Nine decided pairs at 77% order
+agreement is not a magnitude, and 15 of 24 pairs tied, so the honest reading is that the form
+does not cost quality and may buy a little -- at two thirds fewer tokens. That is the outcome
+that makes the arm worth having. (An earlier version of this table read 5-2: it held two
+checkpoints out of the tally that the corrected label below puts back in.)
 
-## The refusal stratum went the other way -- and the reason is a broken label, not a mechanism
+## The refusal stratum went the other way -- and it turned out to have no members
 
-| stratum | pairs | index | prose | order agreement |
-|---|---:|---:|---:|---:|
-| answerable | 22 | **5** | 2 | 0.77 |
-| `must_refuse` | 2 | 0 | **2** | **1.00** |
+The 2-0 split described in this section was first read as compression costing the ability to
+abstain. **That reading is wrong twice over**: the answers do not support it, and the stratum it
+was read from should not exist. The correction is below; the section is kept because the wrong
+reasoning is the instructive part.
 
-Both refusal checkpoints went to the **prose** form, order-consistently. A first reading of this
-was that compression costs the ability to abstain, and it looked corroborated: the 2026-09-19
-run, judging `hybrid_router` against `full_history`, also gave both of these checkpoints to the
-arm with more context.
+Both of the checkpoints filed as `must_refuse` went to the **prose** form, order-consistently, and
+it looked corroborated: the 2026-09-19 run, judging `hybrid_router` against `full_history`, also
+gave both of them to the arm with more context.
 
 **That reading is wrong, and the answers say so.** Checking the refusal flags on the four
 answers behind the earlier result:
@@ -47,33 +47,48 @@ On `q-1227` *both* arms declined and `full_history` still won; on `q-1370` *neit
 in this run: on `q-1227` the index arm is the one whose answer trips the refusal detector, and it
 lost.
 
-### What is actually going on
+### What is actually going on: the label means something else
 
 The two checkpoints carry **contradictory labels**:
 
-| checkpoint | `must_abstain` | first `answer_requirement` |
-|---|---|---|
-| `q-1227` | **True** | 必须明确回答「pinn」能否用于该数模题，并给出适用性判断 |
-| `q-1370` | **True** | 必须明确回答能否用「comsol」辅助做题 |
+| checkpoint | `must_abstain` | `query_type` | first `answer_requirement` |
+|---|---|---|---|
+| `q-1227` | **True** | `new_context` | 必须明确回答「pinn」能否用于该数模题，并给出适用性判断 |
+| `q-1370` | **True** | `new_context` | 必须明确回答能否用「comsol」辅助做题 |
 
-`must_abstain` says the correct behaviour is to decline. The requirements say the correct answer
+`must_abstain` says the correct behaviour is to decline; the requirements say the correct answer
 must clearly state whether the method can be used and must recommend it as an auxiliary check.
 The judge scores against the **requirements**, so it rewards the answer that engages, and the
-abstention label is unreachable by construction. The 2-0 is a judge preferring the more decisive
-answer, and the stratum is not measuring refusal at all.
+abstention label is unreachable by construction.
 
-This is a real defect in the benchmark rather than a result about compression, and it is the
-second label problem found the same way -- by reading the answers instead of the tally. Which of
-the two labels is right is a judgement call that needs making: `q-1227` asks whether PINN is
-applicable, which is arguably answerable from method knowledge rather than from the conversation,
-in which case `must_abstain` is the wrong label; `q-1370` asks the same about COMSOL. Until that
-is settled the stratum should not be reported, and no conclusion about abstention should be drawn
-from it.
+**The contradiction is in the reader, not in the labels.** The annotation protocol sets
+`must_abstain` by two rules: rule 1, where the reference reply drew on no context *and declined*
+(`unanswerable`), and rule 2, where it drew on no context *and did not decline* (`new_context`).
+Both checkpoints are rule 2. `must_abstain` there is a descriptive fact about the reference reply
+-- it answered from method knowledge rather than from the conversation -- and the requirements
+are consistent with it. The evaluation was reading a provenance label as a behavioural
+requirement, so it scored a good answer as a failed refusal.
 
-The head-length sweep that was launched to test the abstention hypothesis is therefore testing
+**Fixed** (`04531fc`): scoring and the judge's strata now key on `query_type == "unanswerable"`,
+which is the protocol's rule 1 and the only case where declining is correct. No checkpoint in
+this dataset is `unanswerable`, so **the refusal stratum has zero members** and every judged pair
+belongs in the main tally.
+
+Re-counted from the saved outcomes, at no cost:
+
+| run | as reported | corrected |
+|---|---|---|
+| 9-20 `hybrid_router` vs `query_recent_only` | 6-2, 14 ties (22 pairs) | **6-3**, 15 ties (24) |
+| 9-21 `indexed_router` vs prose, head 160 | 5-2, 15 ties (22) | **5-4**, 15 ties (24) |
+| 9-21 `indexed_router` vs prose, head 320 | 3-6, 12 ties (21) | **4-7**, 12 ties (23) |
+
+Small, all the same direction, and **no conclusion in this document changes**. That is the useful
+thing about this class of defect: it is worth fixing precisely because it was not load-bearing
+enough to have been caught from the results.
+
+The head-length sweep that was launched to test the abstention hypothesis was therefore testing
 something that does not exist as stated. Its coverage curve is still worth having -- it answers
-"how short can the head be before answers degrade" -- but its refusal counts are reported with
-this caveat or not at all.
+"how short can the head be before answers degrade" -- and its refusal counts are not reported.
 
 ## The head length is a real knob, and the default sits at the bottom of its curve
 
@@ -111,7 +126,7 @@ names more of them; that is exactly the failure caught on `q-0801` below.
 
 | | head 160 | head 320 |
 |---|---|---|
-| judge: `indexed_router` vs prose | **5-2** | **3-6** |
+| judge: `indexed_router` vs prose | **5-4** | **4-7** |
 | coverage: index vs prose | 0.278 vs 0.299 | **0.326** vs 0.270 |
 | mean memory tokens | 660 vs 1,625 | 808 vs 1,605 |
 
@@ -120,9 +135,10 @@ scored *lower* coverage and *won*; at 320 it scored *higher* coverage and *lost*
 gain the sweep found was verbosity, exactly as the `q-0801` case predicted, and the sweep's
 reading of 320 as the best point is refuted.
 
-Across the two judged runs the forms are a dead heat: **8 wins each on 16 decided pairs, with 27
-ties.** The honest conclusion is that the form is not measurably load-bearing at either head
-length, and the 51-67% token saving is therefore not being paid for in answer quality.
+Across the two judged runs the forms are **9 to 11 on 20 decided pairs, with 27 ties** -- the
+prose form marginally ahead, and 9 of 20 is as close to even as an even number allows. The honest
+conclusion is that the form is not measurably load-bearing at either head length, and the 51-67%
+token saving is therefore not being paid for in answer quality.
 
 The caveat is the instrument. Order agreement was 0.77 and 0.75, and 27 of 43 pairs tied -- a
 real difference smaller than roughly a fifth of pairs would be invisible to a judge that
@@ -134,8 +150,9 @@ strength of the coverage curve would have been changing it on the strength of th
 comparison just refuted.
 
 The `must_refuse` stratum split 1-1 at head 320, having gone 0-2 and 2-0 in the two earlier runs.
-Three runs, three different answers, from a stratum whose labels contradict each other -- which is
-the clearest possible statement that it should not be reported until that is resolved.
+Three runs, three different answers -- from a stratum that has since turned out to have **no
+members at all**. Those three results were noise being read as a pattern, which is what a stratum
+built on a misread label produces.
 
 ## What the coverage number would have said
 

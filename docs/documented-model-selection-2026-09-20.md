@@ -1,10 +1,11 @@
 # Choosing a documented model, and what the choice costs the gate
 
 2026-09-20. The 2026-09-19 judge run settled that the query-derived labels work and left the
-direction favouring `full_history` 5-2 at n = 18 -- under `deepseek-v4.1-flash`, a private proxy
-alias that the gateway resolves to `deepseek-v4-1-flash-260910`. Nothing publishable can rest on
-an alias, so the next step named in `docs/answer-gate-judge-2026-09-19.md` was to re-run the
-whole gate under a model with a public, stable name.
+direction favouring `full_history` 7-2 at n = 18 -- re-counted on 2026-09-21, where it read 5-2
+when written -- under `deepseek-v4.1-flash`, a private proxy alias that the gateway resolves to
+`deepseek-v4-1-flash-260910`. Nothing publishable can rest on an alias, so the next step named in
+`docs/answer-gate-judge-2026-09-19.md` was to re-run the whole gate under a model with a public,
+stable name.
 
 Selecting that model turned out to be a measurement, not a lookup, and the measurement changed
 the experiment's design. This records both.
