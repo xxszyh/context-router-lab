@@ -7,6 +7,7 @@ from context_router.evaluation.arms import (
     ARM_NAMES,
     ArmCase,
     ArmCaseResult,
+    assemble_arm,
     build_arm_cases,
     evaluate_arms,
     first_gate,
@@ -47,6 +48,7 @@ def test_arm_names_cover_the_planned_baselines() -> None:
         "global_dense",
         "global_hybrid",
         "hybrid_router",
+        "indexed_router",
         "oracle_router",
     }
 
@@ -100,6 +102,113 @@ def test_no_arm_exceeds_its_token_budget_except_full_history(results: list[ArmCa
         if result.arm == "full_history":
             continue
         assert result.memory_tokens <= budgets[result.sample_id], (result.arm, result.sample_id)
+
+
+def test_indexed_router_differs_from_hybrid_router_only_in_form(
+    cases: list[ArmCase],
+) -> None:
+    """The pair is an ablation of rendering, and that is the only thing it may vary.
+
+    If the selection drifted -- a different context, a different event, a different order --
+    then a difference between the two arms would be unattributable: it could be the form or it
+    could be the routing, and nothing in the result would say which. So the identity of the
+    selection is asserted here rather than assumed, and the rendering is asserted to differ.
+    """
+
+    differed = 0
+    for case in cases:
+        prose = assemble_arm("hybrid_router", case)
+        index = assemble_arm("indexed_router", case)
+
+        assert index.selected_context_ids == prose.selected_context_ids, case.sample_id
+        assert index.included_event_ids == prose.included_event_ids, case.sample_id
+        assert index.decision == prose.decision, case.sample_id
+
+        if prose.rendered_text:
+            assert index.rendered_text != prose.rendered_text, case.sample_id
+            differed += 1
+
+    assert differed, "no checkpoint rendered differently, so the arm is not doing anything"
+
+
+def test_the_indexed_form_costs_no_more_than_the_prose_it_replaces(
+    cases: list[ArmCase],
+) -> None:
+    """Truncating bodies to a head cannot cost more than keeping them whole.
+
+    This is the property that makes the arm worth running: if the compact form is also more
+    expensive, the ablation has no case at all.
+    """
+
+    for case in cases:
+        prose = assemble_arm("hybrid_router", case)
+        index = assemble_arm("indexed_router", case)
+        assert index.memory_tokens <= prose.memory_tokens, case.sample_id
+
+
+def test_a_short_turn_falls_back_to_prose_rather_than_growing(cases: list[ArmCase]) -> None:
+    """The indexed form is a compression, so it must never expand.
+
+    A short turn costs less to keep whole than to re-render with its metadata attached. If a row
+    grew, the arm would exceed the budget its prose twin respected -- and, because the budget fit
+    measures the prose cost, the admitted set would stop matching too. Both invariants hold only
+    while every row is no larger than the prose it replaces, so the renderer falls back rather
+    than trusting the data to be long.
+    """
+
+    from context_router.assembly.builder import ContextBuilder, _Block  # noqa: PLC0415
+
+    builder = ContextBuilder(render_mode="index")
+    short = _Block(text="[Recent][evt-1][user/message] 好", section="recent", context_id="c1")
+
+    assert builder._row(0, short) == short.text
+
+
+def test_the_indexed_form_keeps_every_events_identity(cases: list[ArmCase]) -> None:
+    """A truncated body must not become an anonymous row: the index still says which turn it is.
+
+    Losing the sequence number would leave the model unable to refer to a turn it can see, which
+    is the whole reason the form exists.
+
+    The synthetic fixture's turns are short enough that every row falls back to prose, so this
+    inflates one checkpoint's turns to give the renderer something worth compressing.
+    """
+
+    from datetime import UTC, datetime
+
+    from context_router.assembly.builder import (  # noqa: PLC0415
+        INDEX_HEAD_CHARS,
+        ContextBuilder,
+        _Block,
+    )
+    from context_router.domain import RawEvent  # noqa: PLC0415
+
+    # Tested at the renderer rather than through an arm: the synthetic fixture's turns are short
+    # enough that every row falls back to prose, and inflating them far enough to compress
+    # changes what the router selects, which would make this a test of the fixture.
+    long_event = RawEvent.create(
+        event_id="evt-7",
+        session_id="syn-000",
+        sequence=7,
+        occurred_at=datetime(2026, 9, 1, tzinfo=UTC),
+        ingested_at=datetime(2026, 9, 1, tzinfo=UTC),
+        actor="assistant",
+        kind="message",
+        content="上下文填充 " * 200,
+    )
+    prose = _Block(
+        text=f"[Evidence:c1][evt-7][assistant/message] {long_event.content}",
+        section="evidence",
+        context_id="c1",
+        event=long_event,
+    )
+
+    row = ContextBuilder(render_mode="index")._row(3, prose)
+
+    assert row.startswith("[3] evidence ctx=c1 seq=7 assistant/message: "), row[:60]
+    assert row.endswith("…"), "a long body must be truncated, not carried whole"
+    assert str(INDEX_HEAD_CHARS) not in row, "the head limit is characters, not a printed count"
+    assert len(row) < len(prose.text), "the row must be smaller than the prose it replaces"
 
 
 def test_full_history_contains_the_whole_causal_session(cases: list[ArmCase]) -> None:

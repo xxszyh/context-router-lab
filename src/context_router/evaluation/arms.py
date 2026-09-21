@@ -20,7 +20,7 @@ from typing import Literal, Protocol
 
 from pydantic import Field
 
-from context_router.assembly import assemble_context
+from context_router.assembly import assemble_context, assemble_indexed_context
 from context_router.assembly.builder import TokenCounter
 from context_router.domain import (
     AssemblyRequest,
@@ -50,6 +50,7 @@ ArmName = Literal[
     "global_dense",
     "global_hybrid",
     "hybrid_router",
+    "indexed_router",
     "oracle_router",
 ]
 
@@ -62,6 +63,7 @@ ARM_NAMES: tuple[ArmName, ...] = (
     "global_dense",
     "global_hybrid",
     "hybrid_router",
+    "indexed_router",
     "oracle_router",
 )
 
@@ -597,7 +599,7 @@ def assemble_arm(
         )
 
     active_router = router or ContextRouter()
-    if name == "hybrid_router":
+    if name in ("hybrid_router", "indexed_router"):
         decision = active_router.route(
             RouteRequest(
                 query_event_id=case.query_event_id,
@@ -623,13 +625,21 @@ def assemble_arm(
         token_budget=case.token_budget,
         system_rules=case.system_rules,
     )
+    # `indexed_router` is `hybrid_router` with the rendering changed and nothing else: same
+    # router, same decision, same events, same order. Holding the selection fixed is the point
+    # -- it is what makes the pair an ablation of *form* rather than a second routing strategy.
+    assembled = (
+        assemble_indexed_context(request, decision)
+        if name == "indexed_router"
+        else assemble_context(request, decision)
+    )
     return finish(
-        _from_working_context(assemble_context(request, decision)),
+        _from_working_context(assembled),
         decision.selected_context_ids,
         decision=decision.decision,
         confidence=decision.confidence,
         trace_id=decision.trace_id,
-        profile=profile,
+        profile=profile if name != "indexed_router" else f"{profile}+index",
     )
 
 

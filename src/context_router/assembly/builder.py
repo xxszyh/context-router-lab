@@ -4,6 +4,7 @@ import math
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from typing import Literal
 
 from context_router.domain import (
     AssemblyRequest,
@@ -42,6 +43,18 @@ EVIDENCE_WEIGHTS = {"lexical": 0.45, "dense": 0.40, "relevance": 0.15}
 #: 1.000); it stays available as a knob for the budget sweep.
 EVIDENCE_MAX_GROUPS_PER_CONTEXT: int | None = None
 EVIDENCE_SCORE_FLOOR = 0.5
+
+#: How many characters of an event's body survive into the indexed form. The index keeps every
+#: event's identity -- section, context, sequence, actor and kind -- and truncates only the
+#: prose, which is the trade the form makes: the model can see *that* a turn exists and what it
+#: was about, and pays for the head rather than the whole.
+INDEX_HEAD_CHARS = 160
+
+#: `prose` is the original rendering, one block per event with the body intact. `index` renders
+#: the same selection as one compact row per block. Both are selections of the same events in
+#: the same order -- the difference is the form, which is the variable the `indexed_router` arm
+#: exists to isolate.
+RenderMode = Literal["prose", "index"]
 
 
 class TokenCounter:
@@ -96,10 +109,12 @@ class ContextBuilder:
         *,
         analyzer: LexicalAnalyzer | None = None,
         token_counter: TokenCounter | None = None,
+        render_mode: RenderMode = "prose",
     ) -> None:
         self.analyzer = analyzer or LexicalAnalyzer()
         self.token_counter = token_counter or TokenCounter()
         self.embedding = HashEmbeddingProvider(analyzer=self.analyzer)
+        self.render_mode: RenderMode = render_mode
 
     def assemble(self, request: AssemblyRequest, decision: RouteDecision) -> WorkingContext:
         selected = list(dict.fromkeys(decision.selected_context_ids))
@@ -214,16 +229,26 @@ class ContextBuilder:
                     if event.event_id not in already_selected:
                         dropped.append({"event_id": event.event_id, "reason": "token_budget"})
 
-        rendered, spans = self._render(selected_blocks)
-        memory_tokens = self.token_counter.count(rendered)
-        # Separators may add tokens not charged while selecting.
-        # Remove whole trailing blocks until the rendered text is safe.
-        while memory_tokens > request.token_budget and selected_blocks:
+        # Separators may add tokens not charged while selecting. Remove whole trailing blocks
+        # until the rendered text is safe.
+        #
+        # The fit is measured on the *prose* cost even when the output is indexed, and that is
+        # deliberate rather than an oversight: this loop decides which events are admitted, so
+        # fitting it on the rendered form would make the selection depend on the rendering. The
+        # indexed form is cheaper per event, so it would admit more of them, and the two arms
+        # would then differ in content as well as in form -- which is exactly the confound the
+        # `indexed_router` arm exists to avoid. Fitting on a fixed cost holds the selection
+        # identical and leaves the rendering as the only variable. A router that spent the freed
+        # budget on more events is a different, also interesting arm; it is not this one.
+        prose_cost = self.token_counter.count(self._prose_text(selected_blocks))
+        while prose_cost > request.token_budget and selected_blocks:
             removed = selected_blocks.pop()
             if removed.event:
                 dropped.append({"event_id": removed.event.event_id, "reason": "separator_budget"})
-            rendered, spans = self._render(selected_blocks)
-            memory_tokens = self.token_counter.count(rendered)
+            prose_cost = self.token_counter.count(self._prose_text(selected_blocks))
+
+        rendered, spans = self._render(selected_blocks)
+        memory_tokens = self.token_counter.count(rendered)
 
         included_event_ids = [
             block.event.event_id for block in selected_blocks if block.event is not None
@@ -345,18 +370,26 @@ class ContextBuilder:
             groups.append(_EventGroup(events=ordered, context_id=context_id, score=score))
         return groups
 
-    @staticmethod
-    def _render(blocks: list[_Block]) -> tuple[str, list[SourceSpan]]:
+    def _render(self, blocks: list[_Block]) -> tuple[str, list[SourceSpan]]:
+        """Render the selected blocks in the builder's configured form.
+
+        Both forms take the same list in the same order and emit one row per block, so the
+        source spans line up and the two are interchangeable downstream. Only the text differs.
+        """
+
+        rows = [self._row(index, block) for index, block in enumerate(blocks)]
+        separator = "\n\n" if self.render_mode == "prose" else "\n"
+
         parts: list[str] = []
         spans: list[SourceSpan] = []
         cursor = 0
-        for index, block in enumerate(blocks):
+        for index, (block, row) in enumerate(zip(blocks, rows, strict=True)):
             if index:
-                parts.append("\n\n")
-                cursor += 2
+                parts.append(separator)
+                cursor += len(separator)
             start = cursor
-            parts.append(block.text)
-            cursor += len(block.text)
+            parts.append(row)
+            cursor += len(row)
             spans.append(
                 SourceSpan(
                     event_id=block.event.event_id if block.event else None,
@@ -368,11 +401,70 @@ class ContextBuilder:
             )
         return "".join(parts), spans
 
+    @staticmethod
+    def _prose_text(blocks: list[_Block]) -> str:
+        """What these blocks would cost in the original form, whatever mode is configured.
+
+        Only the budget fit uses this, so that the admitted set is a property of the selection
+        and not of the rendering.
+        """
+
+        return "\n\n".join(block.text for block in blocks)
+
+    def _row(self, index: int, block: _Block) -> str:
+        if self.render_mode == "prose":
+            return block.text
+
+        candidate = self._index_row(index, block)
+        # The indexed form is a compression, so it must never expand. A short turn costs less to
+        # keep than to re-render with its metadata, and a row that grew would break two things at
+        # once: the arm would exceed the budget its prose twin respected, and -- because the
+        # budget fit measures the prose cost -- the admitted set would stop matching. Falling
+        # back keeps both invariants true by construction rather than by hoping the data is long.
+        if self.token_counter.count(candidate) > self.token_counter.count(block.text):
+            return block.text
+        return candidate
+
+    def _index_row(self, index: int, block: _Block) -> str:
+        """One block as a single compact row: identity kept, body truncated to a head."""
+
+        if block.event is None:
+            # A context descriptor is already short, and its goal and summary are the whole
+            # reason it is in the selection -- so the row drops the three field labels and the
+            # newlines rather than any of the content.
+            lines = block.text.splitlines()
+            head = lines[0].removeprefix("[Context: ").removesuffix("]") if lines else ""
+            goal = lines[1].removeprefix("Goal: ") if len(lines) > 1 else ""
+            cue = lines[2].removeprefix("Summary cue: ") if len(lines) > 2 else ""
+            return f"[{index}] context {head} | goal: {goal} | cue: {cue}"
+
+        event = block.event
+        head = " ".join(event.content.split())
+        if len(head) > INDEX_HEAD_CHARS:
+            head = head[:INDEX_HEAD_CHARS] + "…"
+        return (
+            f"[{index}] {block.section} ctx={block.context_id} seq={event.sequence} "
+            f"{event.actor}/{event.kind}: {head}"
+        )
+
 
 _DEFAULT_BUILDER = ContextBuilder()
+_INDEXED_BUILDER = ContextBuilder(render_mode="index")
 
 
 def assemble_context(request: AssemblyRequest, decision: RouteDecision) -> WorkingContext:
     """Assemble a causal working set through the default deterministic profile."""
 
     return _DEFAULT_BUILDER.assemble(request, decision)
+
+
+def assemble_indexed_context(request: AssemblyRequest, decision: RouteDecision) -> WorkingContext:
+    """Assemble the same working set, rendered as an index rather than as prose.
+
+    Identical selection and identical events in identical order; only the form changes. It takes
+    the same `RouteDecision` as `assemble_context` on purpose, so a caller can hold the routing
+    fixed and vary the rendering -- which is the only way to tell a routing win from a formatting
+    one.
+    """
+
+    return _INDEXED_BUILDER.assemble(request, decision)
