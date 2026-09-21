@@ -75,6 +75,39 @@ something that does not exist as stated. Its coverage curve is still worth havin
 "how short can the head be before answers degrade" -- but its refusal counts are reported with
 this caveat or not at all.
 
+## The head length is a real knob, and the default sits at the bottom of its curve
+
+The sweep ran the same selection at five head lengths. The refusal counts it was built for say
+nothing -- see above, the stratum is a broken label -- but the coverage curve is a separate and
+useful result.
+
+| head (chars) | mean memory tokens | mean strict coverage, 22 answerable |
+|---:|---:|---:|
+| 40 | 370 | 0.273 |
+| 80 | 452 | 0.222 |
+| **160 (the default)** | **660** | **0.242** |
+| 320 | 789 | **0.341** |
+| 640 | 1,097 | 0.341 |
+| prose (no truncation) | 1,625 | 0.295 |
+
+Two things are worth reading off it, and one caution.
+
+**The default is the worst point on the curve.** `INDEX_HEAD_CHARS = 160` was chosen when the arm
+was built, not measured, and it scores below both its shorter and its longer neighbours. A
+160-character head cuts a dense tool result -- where the numbers a requirement asks for actually
+live -- somewhere in the middle.
+
+**At 320 the compressed form beats the prose form on coverage at half the tokens** (0.341 against
+0.295, 789 against 1,625). If that survives a judge it is the strongest form of the result this
+arm exists to test.
+
+**The caution is the same one that applies to every coverage number in this repository.** The
+curve is not monotone -- 40 scores above 80 and 160, then coverage jumps between 160 and 320 --
+which is what a noisy lexical measure looks like, and 22 checkpoints cannot separate differences
+of this size. Coverage rewards an answer that names more of the right nouns, and a longer answer
+names more of them; that is exactly the failure caught on `q-0801` below. So the curve motivates
+a judged comparison, and does not substitute for one. It has been run for the 320 point.
+
 ## What the coverage number would have said
 
 The lexical measure put the two forms 0.021 apart and would have supported "the compression is
