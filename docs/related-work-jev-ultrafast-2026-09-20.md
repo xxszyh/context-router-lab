@@ -35,13 +35,24 @@ Those are the two canonical answers to context reduction, and this project measu
 them. That suggests a cheap ablation that isolates form from content:
 
 > **`indexed_router`** -- `hybrid_router`'s exact selection, rendered as an index rather than as
-> raw event text. Same events, same order, same token budget, but each event appears as one
-> compact row (index, actor, context, sequence, truncated head) instead of its full prose.
+> raw event text. Same events, same order, each event as one compact row (index, section,
+> context, sequence, actor/kind, truncated head) instead of its full prose.
 
 If the two arms score the same, form does not matter at this scale and the subsetting result
 stands on its own. If the index scores higher at equal tokens, then part of what looks like a
-routing win is really a formatting win, and the paper needs to say so. Either outcome is a
-result, and the arm is a few dozen lines on top of the existing assembly path.
+routing win is really a formatting win, and the paper needs to say so.
+
+**Built, and measured offline.** On the 26 real checkpoints the selection is identical on all 26
+and the rendering is **3,074 memory tokens down to 1,823 -- 41% smaller**. The offline half is
+free and done; what is not done is sending both to a model, which is the only thing that can say
+whether the compressed form preserves the answer.
+
+Two things had to be fixed to make it a real ablation rather than a second routing strategy, and
+both are recorded in the commit. The budget fit originally measured the *rendered* cost, so the
+cheaper form admitted more events and the arms differed in content as well as form; it now
+measures a fixed prose cost. And because the index adds per-row metadata while only saving on
+bodies, a short turn would render *larger* -- so a row is only re-rendered when it is actually
+smaller, which is what makes the arm's budget and its identical selection hold by construction.
 
 Two smaller transfers, both already partly present:
 
