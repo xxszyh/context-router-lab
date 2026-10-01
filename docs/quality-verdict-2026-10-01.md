@@ -1,5 +1,17 @@
 # The quality claim, after both conversations and a better instrument
 
+> **Superseded, same day, by [`judge-anchoring-2026-10-01.md`](judge-anchoring-2026-10-01.md).**
+> Every tally below was produced by the `terse` judge prompt. Anchoring the judge in the text
+> it is judging took `mean_consistency` from 0.797 to 0.891 on the published conversation and
+> 0.853 to 0.864 on sea ice, and independent hand reads agree with the anchored verdicts on
+> 8 of 8 pairs against 2 of 8 for `terse`. Under it the published conversation is **9-3 rather
+> than 7-5** and the pool is **18-17, p = 1.00, rather than 16-22, p = 0.42**.
+>
+> **The null result below is therefore stronger than this document could state, not weaker.**
+> The rest of the page is kept as written, because the instrument comparison it makes — one
+> repeat against three, and why the one-repeat numbers were the ones being reported — is
+> unaffected and is the reason the anchored run was possible at all.
+
 2026-10-01. Every judge run in this project has now been repeated, both conversations have been
 measured with the same instrument, and the result is not the one the project has been reporting.
 

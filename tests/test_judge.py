@@ -4,6 +4,8 @@ import pytest
 
 from context_router.evaluation.judge import (
     JUDGE_INSTRUCTIONS,
+    JUDGE_INSTRUCTIONS_ANCHORED,
+    JUDGE_STYLES,
     CoverageJudge,
     JudgeOutcome,
     JudgePair,
@@ -11,6 +13,7 @@ from context_router.evaluation.judge import (
     RefusalGatedJudge,
     Verdict,
     build_judge_prompt,
+    judge_instructions,
     parse_verdict,
     run_pairwise_judging,
     summarise_judge_strata,
@@ -407,9 +410,13 @@ class _ScriptedModel:
         self.replies = list(replies)
         self.stop_reason = stop_reason
         self.prompts: list[str] = []
+        #: Recorded rather than discarded so a test can prove which prompt variant reached the
+        #: model. The prompt is a parameter of the verdict and was unrecorded for the whole
+        #: history of this project's judge numbers.
+        self.instructions: list[str] = []
 
     def run(self, *, prompt: str, instructions: str) -> AnswerResult:
-        del instructions
+        self.instructions.append(instructions)
         self.prompts.append(prompt)
         text = self.replies.pop(0) if self.replies else ""
         return AnswerResult(
@@ -539,6 +546,71 @@ def test_the_judge_is_told_to_anchor_its_verdict_in_the_requirements() -> None:
     assert "does not satisfy" in lowered, "the echoed-refusal loophole must be closed"
     assert "winner: <a|b|tie>" in lowered
     assert "order" in lowered and "swapped" in lowered
+
+
+@pytest.mark.parametrize("style", sorted(JUDGE_STYLES))
+def test_every_style_keeps_the_rubric_the_verdict_rests_on(style: str) -> None:
+    """A style is a presentation of the rubric, never a different rubric.
+
+    If a variant drops the tie definition or the echoed-refusal rule, its numbers stop being
+    comparable with the other variant's, and the comparison the two exist to support is void.
+    """
+
+    lowered = judge_instructions(style).lower()
+    assert "tie" in lowered and "same requirements" in lowered
+    assert "does not satisfy" in lowered
+    assert "winner: <a|b|tie>" in lowered
+    assert "order" in lowered and "swapped" in lowered
+
+
+def test_the_anchored_style_asks_for_the_quote_the_terse_one_forbids() -> None:
+    """This difference is the whole experiment, so it is pinned rather than described.
+
+    The terse prompt tells the judge not to restate either answer, which leaves the
+    satisfied/not decision resting on nothing quotable. The anchored prompt requires the
+    quote. If a later edit softens either line, the two styles stop being a contrast.
+    """
+
+    assert "do not restate either answer" in JUDGE_INSTRUCTIONS.lower()
+    assert "quote" in JUDGE_INSTRUCTIONS_ANCHORED.lower()
+    assert "do not restate" not in JUDGE_INSTRUCTIONS_ANCHORED.lower()
+
+
+def test_the_chosen_style_is_what_reaches_the_model() -> None:
+    """The default must stay the historical prompt, so old numbers stay reproducible."""
+
+    default_model = _ScriptedModel(["WINNER: a"])
+    LLMJudge(default_model).compare(query="q", requirements=["r"], answer_a="A", answer_b="B")
+    assert default_model.instructions == [JUDGE_INSTRUCTIONS]
+
+    anchored_model = _ScriptedModel(["WINNER: a"])
+    LLMJudge(anchored_model, instructions=JUDGE_INSTRUCTIONS_ANCHORED).compare(
+        query="q", requirements=["r"], answer_a="A", answer_b="B"
+    )
+    assert anchored_model.instructions == [JUDGE_INSTRUCTIONS_ANCHORED]
+
+
+def test_the_prompt_digest_travels_with_the_judge_and_tracks_the_text() -> None:
+    """An artefact has to be able to say which instrument produced it.
+
+    The style name is readable and the digest is not; recording both is what stops a prompt
+    edit from silently re-labelling every number already published under the old one.
+    """
+
+    terse = LLMJudge(_ScriptedModel(["WINNER: a"]))
+    anchored = LLMJudge(_ScriptedModel(["WINNER: a"]), instructions=JUDGE_INSTRUCTIONS_ANCHORED)
+
+    assert terse.instructions_sha256 != anchored.instructions_sha256
+    assert len(terse.instructions_sha256) == 64
+    # Stable across instances, or it identifies nothing.
+    assert terse.instructions_sha256 == LLMJudge(_ScriptedModel([])).instructions_sha256
+
+
+def test_an_unknown_style_is_rejected_rather_than_defaulted() -> None:
+    """Silently falling back to the default would run the old prompt under a new name."""
+
+    with pytest.raises(ValueError, match="unknown judge style"):
+        judge_instructions("anvhored")
 
 
 def test_the_instructions_are_in_the_blinded_judge_prompt_path() -> None:

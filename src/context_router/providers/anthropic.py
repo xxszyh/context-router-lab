@@ -14,6 +14,7 @@ import httpx
 
 from context_router.providers.openai_compatible import AnswerResult
 from context_router.providers.pinned import require_pinned_model
+from context_router.providers.transport import post_with_retry
 
 AuthStyle = Literal["bearer", "x-api-key"]
 
@@ -96,8 +97,9 @@ class AnthropicCompatibleVerdictModel:
             "system": instructions,
             "messages": [{"role": "user", "content": prompt}],
         }
-        response = self.client.post(f"{self.base_url}/v1/messages", headers=self.headers, json=body)
-        response.raise_for_status()
+        response = post_with_retry(
+            self.client, f"{self.base_url}/v1/messages", headers=self.headers, body=body
+        )
         payload = response.json()
         usage = payload.get("usage") or {}
         input_tokens = _input_tokens(usage)
@@ -167,8 +169,9 @@ class AnthropicCompatibleAnswerProvider:
                 }
             ],
         }
-        response = self.client.post(f"{self.base_url}/v1/messages", headers=self.headers, json=body)
-        response.raise_for_status()
+        response = post_with_retry(
+            self.client, f"{self.base_url}/v1/messages", headers=self.headers, body=body
+        )
         payload = response.json()
         usage = payload.get("usage") or {}
         input_tokens = _input_tokens(usage)

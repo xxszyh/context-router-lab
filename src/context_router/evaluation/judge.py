@@ -15,6 +15,7 @@ judge's verdicts have something to be compared against; it is not a substitute f
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections import Counter
@@ -47,6 +48,55 @@ JUDGE_INSTRUCTIONS = (
     "it:\n"
     "WINNER: <a|b|tie>"
 )
+
+#: The same rubric with the analysis anchored in the text. Identical blinding, identical three
+#: rules, identical final line; the only change is that a requirement may not be marked
+#: satisfied without a quote from the answer that decides it.
+#:
+#: This is aimed at a measured failure, not a guessed one. On the published conversation, all
+#: thirteen pairs the judge contradicted itself on contradicted itself *within a single order*
+#: -- no position bias at all -- so the instability is in how it reads the answers, not in where
+#: they sit. `JUDGE_INSTRUCTIONS` forbids the one thing that would ground that reading ("Do not
+#: restate either answer"), which is the cost optimisation the README records as having taken
+#: order agreement down with the output tokens. Splitting that diagnosis is
+#: `docs/judge-anchoring-2026-10-01.md`.
+JUDGE_INSTRUCTIONS_ANCHORED = (
+    "You compare two candidate answers to the same question about a software project. You are "
+    "not told how either was produced and that information is deliberately withheld: judge "
+    "only what the answers say.\n\n"
+    "Work through the requirements one at a time, and decide each on the text rather than on an "
+    "impression:\n"
+    '1. For each requirement, quote the few words from A that decide it, or write "none" if '
+    "nothing in A bears on it, and do the same for B. A requirement marked satisfied without a "
+    "quote is a guess.\n"
+    "2. An answer satisfies a requirement only if it is actually addressed. Repeating a "
+    "requirement's wording while saying the answer cannot be given does NOT satisfy it.\n"
+    '3. Winner: "a" if A satisfies strictly more requirements; "b" if B does; "tie" only if '
+    "both satisfy the same requirements and neither is more correct.\n\n"
+    "The order the answers appear in carries no information, and deciding differently when "
+    "they are swapped is an error.\n\n"
+    "End with exactly this and nothing after it:\n"
+    "WINNER: <a|b|tie>"
+)
+
+#: Named prompts, because the prompt is a parameter of every number a judge produces and was
+#: recorded nowhere until now -- the same defect `state-of-play` records for the lexical
+#: signal's rendering and threshold. A style name travels with the run; the hash below makes a
+#: silent edit to the text detectable after the fact.
+JUDGE_STYLES: dict[str, str] = {
+    "terse": JUDGE_INSTRUCTIONS,
+    "anchored": JUDGE_INSTRUCTIONS_ANCHORED,
+}
+
+
+def judge_instructions(style: str) -> str:
+    """The prompt text for a named style."""
+
+    try:
+        return JUDGE_STYLES[style]
+    except KeyError:
+        known = ", ".join(sorted(JUDGE_STYLES))
+        raise ValueError(f"unknown judge style {style!r}; known: {known}") from None
 
 
 class Judge(Protocol):
@@ -254,9 +304,16 @@ class LLMJudge:
     count, so this class cannot leak what it is not given.
     """
 
-    def __init__(self, model: VerdictModel, *, retries: int = 1) -> None:
+    def __init__(
+        self, model: VerdictModel, *, retries: int = 1, instructions: str = JUDGE_INSTRUCTIONS
+    ) -> None:
         self.model = model
         self.retries = retries
+        self.instructions = instructions
+        #: A digest of the prompt, so an artefact can say which instrument produced it even
+        #: after the constant is edited. Every judge number in this project before today was
+        #: produced by a prompt nobody recorded.
+        self.instructions_sha256 = hashlib.sha256(instructions.encode("utf-8")).hexdigest()
         self.model_version = f"llm-judge:{model.model_version}"
         self.parse_failures = 0
         self.input_tokens = 0
@@ -273,7 +330,7 @@ class LLMJudge:
         )
         # Retried because an empty reply is transient: a judge run lost 7 of 40 to it.
         for _ in range(self.retries + 1):
-            result = self.model.run(prompt=prompt, instructions=JUDGE_INSTRUCTIONS)
+            result = self.model.run(prompt=prompt, instructions=self.instructions)
             self.input_tokens += result.input_tokens
             self.output_tokens += result.output_tokens
             self.calls.append(

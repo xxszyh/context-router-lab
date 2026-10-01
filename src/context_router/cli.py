@@ -53,6 +53,7 @@ from context_router.evaluation.judge import (
     JudgePair,
     LLMJudge,
     RefusalGatedJudge,
+    judge_instructions,
 )
 from context_router.evaluation.necessity import (
     context_material,
@@ -458,6 +459,13 @@ def judge_answers_command(
     auth_style: Annotated[str, typer.Option(help="bearer or x-api-key")] = "bearer",
     max_tokens: Annotated[int, typer.Option(min=64)] = 4096,
     judge_kind: Annotated[str, typer.Option("--judge", help="llm or coverage")] = "llm",
+    judge_style: Annotated[
+        str,
+        typer.Option(
+            "--judge-style",
+            help="terse (the historical prompt) or anchored (a quote is required per requirement)",
+        ),
+    ] = "terse",
     refusal_gate: Annotated[
         bool,
         typer.Option(
@@ -530,6 +538,10 @@ def judge_answers_command(
             raise typer.BadParameter(
                 "need ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL and a model (or --judge coverage)"
             )
+        try:
+            instructions = judge_instructions(judge_style)
+        except ValueError as error:
+            raise typer.BadParameter(str(error)) from None
         base_judge = LLMJudge(
             AnthropicCompatibleVerdictModel(
                 base_url=resolved_base,
@@ -537,7 +549,8 @@ def judge_answers_command(
                 model=resolved_model,
                 auth_style=auth_style,  # type: ignore[arg-type]
                 max_tokens=max_tokens,
-            )
+            ),
+            instructions=instructions,
         )
     judge: Judge = RefusalGatedJudge(base_judge) if refusal_gate else base_judge
     typer.echo(
@@ -563,6 +576,10 @@ def judge_answers_command(
             "arm_b": arm_b,
             "pairs": len(pairs),
             "repeats": repeats,
+            # The prompt is a parameter of every number below it, and it was recorded nowhere
+            # until now. The style name is readable and the digest is not forgeable by accident.
+            "judge_style": judge_style,
+            "judge_instructions_sha256": getattr(base_judge, "instructions_sha256", None),
             "judged_pairs": sum(outcome.agreement is not None for outcome in outcomes),
             "agreed": sum(1 for outcome in outcomes if outcome.agreement),
             "ties": sum(1 for outcome in outcomes if outcome.winner == "tie"),

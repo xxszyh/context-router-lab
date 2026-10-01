@@ -10,6 +10,7 @@ from pydantic import Field
 
 from context_router.domain import Contract
 from context_router.providers.pinned import require_pinned_model
+from context_router.providers.transport import post_with_retry
 
 
 class AnswerResult(Contract):
@@ -75,8 +76,9 @@ class OpenAICompatibleAnswerProvider:
                 }
             ],
         }
-        response = self.client.post(f"{self.base_url}/responses", headers=self.headers, json=body)
-        response.raise_for_status()
+        response = post_with_retry(
+            self.client, f"{self.base_url}/responses", headers=self.headers, body=body
+        )
         payload = response.json()
         usage = payload.get("usage") or {}
         return AnswerResult(
@@ -108,12 +110,12 @@ class OpenAICompatibleEmbeddingProvider:
         self.headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        response = self.client.post(
+        response = post_with_retry(
+            self.client,
             f"{self.base_url}/embeddings",
             headers=self.headers,
-            json={"model": self.model_version, "input": texts},
+            body={"model": self.model_version, "input": texts},
         )
-        response.raise_for_status()
         data = sorted(response.json()["data"], key=lambda item: item["index"])
         return [[float(value) for value in item["embedding"]] for item in data]
 
@@ -173,8 +175,9 @@ class OpenAICompatibleRelationClassifier:
                 }
             },
         }
-        response = self.client.post(f"{self.base_url}/responses", headers=self.headers, json=body)
-        response.raise_for_status()
+        response = post_with_retry(
+            self.client, f"{self.base_url}/responses", headers=self.headers, body=body
+        )
         parsed = json.loads(_extract_output_text(response.json()))
         probabilities = {key: float(value) for key, value in parsed["probabilities"].items()}
         total = sum(probabilities.values())
