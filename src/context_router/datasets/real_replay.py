@@ -57,7 +57,7 @@ _REDACTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "<secret>"),
     (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"), "<secret>"),
     (re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+"), "<email>"),
-    (re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)"), "<phone>"),
+    (re.compile(r"(?<![0-9a-fA-F])1[3-9]\d{9}(?![0-9a-fA-F])"), "<phone>"),
     (re.compile(r"[A-Za-z]:\\Users\\[^\\\s\"']+"), "<home>"),
     # The same path written with escaped backslashes, which is how it appears inside a tool
     # call's JSON arguments. The pattern above expects one backslash and does not match the
@@ -81,7 +81,12 @@ _REDACTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
 #: leaks, so the failure is loud and happens before anything reaches disk.
 _FORBIDDEN: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("email", re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")),
-    ("phone", re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")),
+    # Not `(?<!\d)`: a UUID's last hex group is twelve characters, and when all twelve are
+    # digits an eleven-digit run starting `1[3-9]` sits inside it, preceded by a hyphen and
+    # followed by a hex letter -- which is exactly a mainland mobile number's shape. The
+    # lookarounds exclude hex neighbours so an identifier cannot be read as a phone, while a
+    # number in prose (preceded and followed by punctuation or Chinese) still matches.
+    ("phone", re.compile(r"(?<![0-9a-fA-F])1[3-9]\d{9}(?![0-9a-fA-F])")),
     ("secret", re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b")),
     ("aws-key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
     ("github-token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b")),
@@ -104,10 +109,27 @@ class ScrubError(RuntimeError):
 
 
 def scrub(text: str) -> str:
-    """Redact personal and machine-specific content from one string."""
+    """Redact personal and machine-specific content from one string.
+
+    Redacts by shape *and* by value, and the second half is not optional. The shapes cover paths;
+    they cannot cover a name that stands alone, and one does: `ls -la` prints the owner in a
+    column, so a directory listing contains the user name between two spaces with no path
+    anywhere near it. A checker that reads by value and a scrubber that writes by shape is a gate
+    that can only ever fail, never fix -- so whatever the checker would reject, this removes.
+    """
 
     for pattern, replacement in _REDACTIONS:
         text = pattern.sub(replacement, text)
+    for token in machine_identity_tokens():
+        # Word boundaries, so a run of digits that merely contains the name is left alone: the
+        # name is an identifier, not a substring, and rewriting digits inside a number would
+        # corrupt the task data the benchmark runs on.
+        text = re.sub(
+            rf"(?<![A-Za-z0-9]){re.escape(token)}(?![A-Za-z0-9])",
+            "<user>",
+            text,
+            flags=re.IGNORECASE,
+        )
     return text
 
 

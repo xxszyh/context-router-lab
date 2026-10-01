@@ -63,6 +63,42 @@ def test_scrub_removes_the_project_directory_slug() -> None:
     assert "somebody" not in cleaned, cleaned
 
 
+def test_scrub_removes_the_name_where_no_path_pattern_can_reach_it() -> None:
+    """A directory listing prints the owner in a column, with no path anywhere near it.
+
+    Found by exporting a second conversation: a `tool_result` holding `ls -la` output carried the
+    user name between two spaces. Every redaction pattern keys on a path shape -- a drive letter,
+    a home prefix, the project slug -- and none of them applies, so the value check could only
+    report the leak, never fix it.
+
+    The fix is that the scrubber redacts by value too. A gate that reads by value and a scrubber
+    that writes by shape is a gate that always fails and never repairs.
+    """
+
+    token = machine_identity_tokens()[0]
+    listing = f"drwxr-xr-x 1 {token} 197609        0 Aug  7 17:27 ."
+
+    cleaned = scrub(listing)
+
+    assert token not in cleaned, cleaned
+    assert "<user>" in cleaned
+    assert_no_machine_identity(cleaned, where="listing")
+
+
+def test_the_value_redaction_does_not_rewrite_digits_inside_a_number() -> None:
+    """The name is an identifier, not a substring.
+
+    A blanket replace would rewrite any number that happens to contain it, and these numbers are
+    the task data the benchmark scores against -- corrupting one would be a silent wrong answer
+    rather than a visible failure.
+    """
+
+    token = machine_identity_tokens()[0]
+
+    for text in (f"x{token}", f"{token}9", f"1{token}", f"21{token}5"):
+        assert scrub(text) == text, text
+
+
 def test_the_gate_catches_the_local_user_name_by_value() -> None:
     """Derived from the environment at call time, so it is never committed and never goes stale.
 
@@ -443,6 +479,31 @@ def test_a_uuids_digit_run_is_not_reported_as_a_phone_number() -> None:
     uuid_like = "claude:d22f2593-21d1-4c36-8156-737656f86e98:187208235433:0:message"
 
     assert_clean(uuid_like, where="identifier")  # must not raise
+
+    # The shape that actually failed, and the one the first case above does not cover: the
+    # digits are *inside* a UUID hex group rather than standing alone as a field. The first
+    # case passed only because its run is twelve digits, one too many to match -- so it was
+    # passing for the wrong reason. Here the run is eleven, preceded by a hyphen and followed
+    # by a hex letter, which is a mainland mobile number's shape exactly.
+    assert_clean(
+        "claude:139471e7-fa6b-40f1-9e6d-ba323ecbb660:"
+        "cc16637e-a3e2-4473-9883-18064487795b:0:message",
+        where="identifier",
+    )
+
+
+def test_a_real_phone_number_is_still_caught_next_to_prose_punctuation() -> None:
+    """Tightening the lookarounds must not become a way for a number to survive.
+
+    The pattern now refuses to match inside hex, so the risk is the other direction: a genuine
+    number preceded or followed by a letter would slip through. Chinese punctuation and spaces
+    are the realistic neighbours and all of them still match.
+    """
+
+    for text in ("联系 13800138000 或发邮件", "电话：13912345678。", "call 15857267118 now"):
+        with pytest.raises(ScrubError, match="phone"):
+            assert_clean(text, where="prose")
+        assert scrub(text).count("<phone>") == 1
 
 
 def test_the_guard_does_not_echo_what_it_caught() -> None:
