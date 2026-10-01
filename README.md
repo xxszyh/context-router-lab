@@ -332,6 +332,38 @@ the lexical metric scoring fluent refusals as correct answers, the judge discard
 replies it needed for diagnosis, and a thinking block consuming the output budget so the
 verdict was never emitted.
 
+## Answer quality: the result, on a documented model
+
+The fresh run this section used to ask for has now happened, on `kimi-k2.5`, over two real
+conversations, with the judge asked three times per pair in both orders. **It is a null
+result.**
+
+| pooled, 35 decided pairs | `hybrid_router` | `query_recent_only` | ties | p |
+|---|---:|---:|---:|---:|
+| terse judge | 16 | 22 | 30 | 0.42 |
+| **anchored judge** | **18** | **17** | 33 | **1.00** |
+
+**A blinded judge cannot distinguish relevance-selection from recency-selection.** The 6–3
+lead the project reported earlier came from a weaker instrument: 42% of its ties were the two
+orders contradicting each other and the protocol collapsing that into a tie. Asking each pair
+three times removed those ties and flipped no decided pair, and the lead did not survive.
+
+Two things did survive, and neither depends on a judge:
+
+- `full_history` **ran on 5 of 24 checkpoints** and failed the other 19 with HTTP 400 context
+  refusals, against a documented model's own ceiling — 79%, where the generous 1M proxy alias
+  had reported 10%;
+- `hybrid_router` reads **1,671** memory tokens against `full_history`'s median **370,102**.
+
+The judge itself was then fixed. Order disagreement turned out to be in how it *read* the
+answers rather than where they sat — all thirteen self-contradicting pairs on the published
+conversation contradicted themselves within a single order, with no position bias at all —
+and the prompt forbade the one thing that would have grounded the reading. Requiring a quote
+per requirement took `mean_consistency` from 0.797 to 0.891, left the tie count unchanged, and
+moved no decided pair; independent hand reads agree with the anchored verdicts on 8 of 8 pairs
+against 2 of 8 for the old prompt. `--judge-style terse` keeps the old prompt available, and
+every judge artefact now records which one produced it. → `docs/judge-anchoring-2026-10-01.md`
+
 ## Scope of Phase 0–1
 
 Implemented: append-only SQLite event store with causal replay and lossless JSONL
@@ -347,12 +379,13 @@ any Codex/MCP integration.
 
 ## Honest limitations
 
-1. **The magnitude of answer quality is still unmeasured.** A small private-model run
-   corroborates the direction of the evidence-recall result, but its six judge iterations
-   never produced a simultaneously correct, stable and reproducible instrument. The model
-   alias was private, n was 20 and the saved answer artefact was not retained. The claim
-   "quality does not drop" therefore still needs a fresh run against a documented pinned
-   model; the current result is evidence, not a final estimate.
+1. **Answer quality is a null result, and a null is not a proof of no difference.** The run
+   against a documented pinned model has happened: two conversations, 35 decided pairs,
+   p = 1.00 under the anchored judge. That bounds any quality advantage above roughly the
+   effect this sample could have seen — it does not establish that the arms are equivalent,
+   and it says nothing about the arms on a third conversation. The project's earlier
+   direction-only reading, from a private alias with n = 20 and no retained artefact, is
+   superseded rather than confirmed.
 2. **The default embedder is not semantic.** `HashEmbeddingProvider` is a deterministic
    offline placeholder that hashes tokens into a 256-dimension vector. It makes
    `global_dense` and `global_hybrid` *reproducible smoke baselines*, not real dense
