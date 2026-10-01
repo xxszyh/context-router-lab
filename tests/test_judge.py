@@ -130,6 +130,101 @@ class _ConsistentJudge:
         return "a" if len(answer_a) > len(answer_b) else "b"
 
 
+class _FlakyJudge:
+    """Decides by answer length, so it is position-independent, but abstains on chosen calls.
+
+    Position-independence is what makes it a stand-in for a real judge rather than a stub that
+    ignores its input: the same comparison shown in the other order must come back flipped, or
+    the swap is measuring the stub. It abstains rather than reversing on the flaky calls, which
+    is the shape the project's runs actually show -- 42% of their ties are the orders
+    contradicting each other.
+    """
+
+    model_version = "flaky"
+
+    def __init__(self, abstains_on: set[int]) -> None:
+        self.abstains_on = abstains_on
+        self.calls = 0
+
+    def compare(
+        self, *, query: str, requirements: list[str], answer_a: str, answer_b: str
+    ) -> Verdict:
+        del query, requirements
+        index = self.calls
+        self.calls += 1
+        if index in self.abstains_on:
+            return "tie"
+        return "a" if len(answer_a) >= len(answer_b) else "b"
+
+
+def test_repeats_take_a_strict_majority_over_both_orders() -> None:
+    """Six calls, five of them 'a': a decision, and `consistency` says how contested it was."""
+
+    outcomes = run_pairwise_judging(
+        _FlakyJudge(abstains_on={3}), [pair("long answer text", "x")], repeats=3
+    )
+
+    assert outcomes[0].winner == "a"
+    assert outcomes[0].verdicts == ["a", "a", "a", "tie", "a", "a"]
+    assert outcomes[0].consistency == pytest.approx(5 / 6)
+    assert outcomes[0].agreement is False, "not unanimous, so the coarser flag is False"
+
+
+def test_an_even_split_is_a_tie_rather_than_whichever_verdict_came_first() -> None:
+    """Three of six each way is not a majority, and must not be decided by ordering.
+
+    `Counter.most_common` breaks ties by insertion order, so a three-three split would silently
+    become whatever verdict happened to be counted first. The strict `most * 2 > len` test is
+    what stops that.
+    """
+
+    outcomes = run_pairwise_judging(
+        _FlakyJudge(abstains_on={0, 1, 2}), [pair("long answer text", "x")], repeats=3
+    )
+
+    assert outcomes[0].verdicts == ["tie", "tie", "tie", "a", "a", "a"]
+    assert outcomes[0].winner == "tie"
+    assert outcomes[0].consistency == pytest.approx(0.5)
+
+
+def test_repetition_does_not_invent_a_decision_the_judge_does_not_have() -> None:
+    """A judge that always says tie keeps saying tie, however many times it is asked.
+
+    This is the property that separates the two kinds of tie. 42% of this project's ties are the
+    orders contradicting each other, which repetition removes; the other 58% are the judge
+    finding the answers equal, which it must not remove.
+    """
+
+    class _AlwaysTies:
+        model_version = "always-ties"
+
+        def compare(
+            self, *, query: str, requirements: list[str], answer_a: str, answer_b: str
+        ) -> Verdict:
+            del query, requirements, answer_a, answer_b
+            return "tie"
+
+    outcomes = run_pairwise_judging(_AlwaysTies(), [pair("x", "y")], repeats=4)
+
+    assert outcomes[0].winner == "tie"
+    assert outcomes[0].verdicts == ["tie"] * 8
+    assert outcomes[0].consistency == 1.0, "unanimous, and unanimous on a tie"
+
+
+def test_one_repeat_reproduces_the_old_two_order_behaviour() -> None:
+    """The default must not change what every earlier run measured."""
+
+    consistent = run_pairwise_judging(_ConsistentJudge(), [pair("long answer text", "x")])
+    assert consistent[0].winner == "a"
+    assert consistent[0].agreement is True
+    assert consistent[0].consistency == 1.0
+
+    biased = run_pairwise_judging(_PositionBiasedJudge(), [pair("long answer text", "x")])
+    assert biased[0].winner == "tie"
+    assert biased[0].agreement is False
+    assert biased[0].consistency == 0.5
+
+
 def test_swapping_catches_a_position_biased_judge() -> None:
     outcomes = run_pairwise_judging(_PositionBiasedJudge(), [pair("long answer text", "x")])
 

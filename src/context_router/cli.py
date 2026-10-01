@@ -465,6 +465,13 @@ def judge_answers_command(
             help="Tie two explicit refusals before calling the judge",
         ),
     ] = True,
+    repeats: Annotated[
+        int,
+        typer.Option(
+            min=1,
+            help="Times to ask each pair, in both orders each time; strict majority decides",
+        ),
+    ] = 1,
 ) -> None:
     """Blind-judge two arms' answers pairwise, in both orders, and tally the wins.
 
@@ -534,10 +541,10 @@ def judge_answers_command(
         )
     judge: Judge = RefusalGatedJudge(base_judge) if refusal_gate else base_judge
     typer.echo(
-        f"{len(pairs)} pairs x 2 orders <= {len(pairs) * 2} judge calls; "
-        f"judge={judge.model_version}"
+        f"{len(pairs)} pairs x 2 orders x {repeats} repeat(s) <= "
+        f"{len(pairs) * 2 * repeats} judge calls; judge={judge.model_version}"
     )
-    outcomes = run_pairwise_judging(judge, pairs, swap=True)
+    outcomes = run_pairwise_judging(judge, pairs, swap=True, repeats=repeats)
     answerable_outcomes = [
         outcome for pair, outcome in zip(pairs, outcomes, strict=True) if not pair.expects_refusal
     ]
@@ -555,9 +562,21 @@ def judge_answers_command(
             "arm_a": arm_a,
             "arm_b": arm_b,
             "pairs": len(pairs),
+            "repeats": repeats,
             "judged_pairs": sum(outcome.agreement is not None for outcome in outcomes),
             "agreed": sum(1 for outcome in outcomes if outcome.agreement),
             "ties": sum(1 for outcome in outcomes if outcome.winner == "tie"),
+            # Reported alongside `agreed` because they answer different questions: `agreed` is
+            # whether every call matched, `mean_consistency` is how close to unanimous they were.
+            # With one repeat they carry the same information at different grains; with more,
+            # only this one shows how contested the decided pairs were.
+            "mean_consistency": (
+                round(
+                    sum(o.consistency for o in outcomes if o.consistency is not None)
+                    / max(1, sum(1 for o in outcomes if o.consistency is not None)),
+                    4,
+                )
+            ),
             "refusal_gate": refusal_gate,
             "refusal_gate_hits": getattr(judge, "gate_hits", 0),
             "refusal_gated_pairs": getattr(judge, "gate_hits", 0),
@@ -895,9 +914,11 @@ def _arms_report(payload: dict[str, Any]) -> list[str]:
         if row is None:
             continue
         reduction = row.get("token_reduction_vs_full_history", 0.0)
+        recall = row["evidence_set_recall"]
+        recall_text = f"{recall:.3f}" if recall is not None else "n/a"
         lines.append(
             f"| `{name}` | {row['mean_memory_tokens']:.1f} | {row['median_memory_tokens']:.1f} "
-            f"| {reduction:.1%} | {row['evidence_set_recall']:.3f} "
+            f"| {reduction:.1%} | {recall_text} "
             f"| {int(row['future_leakage_total'])} |"
         )
     lines += [

@@ -17,8 +17,11 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from statistics import fmean
 from typing import Literal, Protocol, cast, runtime_checkable
+
+from pydantic import Field
 
 from context_router.domain import Contract
 from context_router.evaluation.scoring import deterministic_coverage, is_refusal
@@ -143,8 +146,15 @@ class JudgeOutcome(Contract):
     #: Resolved back onto arm_a / arm_b, never the position the judge happened to see.
     winner: Verdict
     swapped: bool
-    #: None when only one order was judged; False means the two orders disagreed.
+    #: None when only one order was judged; False means the calls disagreed.
     agreement: bool | None
+    #: Every call's verdict, normalised onto arm_a / arm_b. Kept so a majority can be re-derived
+    #: and so a pair's instability is visible rather than summarised away.
+    verdicts: list[Verdict] = Field(default_factory=list)
+    #: Share of calls that landed on the winner. With one repeat this is 1.0 or 0.5, and the
+    #: binary `agreement` above is the same information at a coarser grain; with more repeats it
+    #: is the only place the degree of agreement survives.
+    consistency: float | None = None
     decision_source: DecisionSource = "judge"
 
 
@@ -289,9 +299,24 @@ def _flip(verdict: Verdict) -> Verdict:
 
 
 def run_pairwise_judging(
-    judge: Judge, pairs: list[JudgePair], *, swap: bool = True
+    judge: Judge, pairs: list[JudgePair], *, swap: bool = True, repeats: int = 1
 ) -> list[JudgeOutcome]:
-    """Judge every pair, optionally in both orders, and resolve verdicts onto the arms."""
+    """Judge every pair, optionally in both orders and more than once, and resolve onto the arms.
+
+    ``repeats`` is the instrument's stability knob. Measured across this project's judge runs, 42%
+    of the ties are not the judge finding two answers equal -- they are the two orders
+    contradicting each other and the protocol collapsing that into a tie. Those are noise, and
+    asking the same question again is what removes noise. The 52% that are genuine ties stay
+    ties however many times they are asked, which is the right behaviour: repetition should not
+    manufacture a decision the judge does not have.
+
+    Each repeat contributes both orders, so the calls per pair are ``2 * repeats`` and a strict
+    majority is required. No majority means a tie, and the verdicts are kept on the outcome so
+    the split is visible rather than flattened.
+    """
+
+    if repeats < 1:
+        raise ValueError("repeats must be at least 1")
 
     outcomes: list[JudgeOutcome] = []
     for pair in pairs:
@@ -318,41 +343,49 @@ def run_pairwise_judging(
                 )
             )
             continue
-        forward = judge.compare(
-            query=pair.query,
-            requirements=pair.requirements,
-            answer_a=pair.answer_a,
-            answer_b=pair.answer_b,
-        )
-        if not swap:
-            outcomes.append(
-                JudgeOutcome(
-                    sample_id=pair.sample_id,
-                    arm_a=pair.arm_a,
-                    arm_b=pair.arm_b,
-                    winner=forward,
-                    swapped=False,
-                    agreement=None,
+        verdicts: list[Verdict] = []
+        for _ in range(repeats):
+            verdicts.append(
+                judge.compare(
+                    query=pair.query,
+                    requirements=pair.requirements,
+                    answer_a=pair.answer_a,
+                    answer_b=pair.answer_b,
                 )
             )
-            continue
-        # Judging the same pair with the answers exchanged: a verdict that flips with the
-        # position is a verdict about the position, not about the answers.
-        reversed_verdict = judge.compare(
-            query=pair.query,
-            requirements=pair.requirements,
-            answer_a=pair.answer_b,
-            answer_b=pair.answer_a,
-        )
-        consistent = forward == _flip(reversed_verdict)
+            if not swap:
+                continue
+            # Judging the same pair with the answers exchanged: a verdict that flips with the
+            # position is a verdict about the position, not about the answers. Normalised back
+            # onto arm_a before counting, so every entry means the same thing.
+            verdicts.append(
+                _flip(
+                    judge.compare(
+                        query=pair.query,
+                        requirements=pair.requirements,
+                        answer_a=pair.answer_b,
+                        answer_b=pair.answer_a,
+                    )
+                )
+            )
+
+        counts = Counter(verdicts)
+        winner, most = counts.most_common(1)[0]
+        # A strict majority, not a plurality: with an even number of calls a 3-3 split is a tie
+        # and must not be decided by which verdict `most_common` happened to return first.
+        decided = most * 2 > len(verdicts)
         outcomes.append(
             JudgeOutcome(
                 sample_id=pair.sample_id,
                 arm_a=pair.arm_a,
                 arm_b=pair.arm_b,
-                winner=forward if consistent else "tie",
-                swapped=True,
-                agreement=consistent,
+                winner=winner if decided else "tie",
+                swapped=swap,
+                # About the *orders*, so it is unknown when only one order was judged -- even
+                # though the repeats would still give a consistency figure.
+                agreement=(len(counts) == 1) if swap else None,
+                verdicts=verdicts,
+                consistency=most / len(verdicts),
             )
         )
     return outcomes
