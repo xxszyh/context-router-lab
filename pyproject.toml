@@ -26,6 +26,11 @@ dev = [
   "pytest-cov>=5,<7",
   "ruff>=0.8,<1",
 ]
+# A pinned static sentence encoder, for measuring the dense channel against something neural.
+# Optional because it fetches model weights on first use and the base harness is offline by design.
+neural = [
+  "model2vec>=0.9,<1",
+]
 
 [project.scripts]
 ctxlab = "context_router.cli:app"

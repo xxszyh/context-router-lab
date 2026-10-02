@@ -139,3 +139,34 @@ def deterministic_coverage(requirements: list[str], answer: str) -> float:
         return 1.0
     satisfied = sum(1 for requirement in requirements if requirement_satisfied(requirement, answer))
     return satisfied / len(requirements)
+
+
+def requirement_reachability(requirements: list[str], memory: str) -> float | None:
+    """Fraction of substantive requirements whose terms appear in the memory the model was shown.
+
+    This is an *upper bound*, and it is the honest one: if the checkable terms of a requirement
+    are absent from the assembled context, no answer that arm produces can satisfy it, whatever
+    the model does. Scoring the context rather than the answer therefore separates two failures
+    the judge and the coverage metric both conflate -- "the model did not say it" from "the model
+    was never shown it".
+
+    That distinction is the whole reason it exists. On the two real conversations `hybrid_router`
+    shows about half as many of the immediately-preceding turns as `query_recent_only`
+    (1.5 against 2.9), because its recent section is capped at 15% of the budget and its evidence
+    channel is barred from the recent window. If the requirements of the `continue` checkpoints
+    quote those turns, the router is being asked to answer from text it did not receive, and the
+    blinded judge's 0-5 on that cell is a fact about the *assembly*, not about the routing.
+
+    Refusal requirements are excluded rather than scored: "explain that the context is
+    insufficient" is not a claim about evidence being present, so a context containing the phrase
+    would satisfy it for the wrong reason. Returns None when nothing substantive is left to
+    measure, which is not zero.
+    """
+
+    substantive = [
+        requirement for requirement in requirements if not is_refusal_requirement(requirement)
+    ]
+    if not substantive:
+        return None
+    reachable = sum(1 for requirement in substantive if requirement_satisfied(requirement, memory))
+    return reachable / len(substantive)

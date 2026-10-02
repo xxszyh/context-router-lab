@@ -8,6 +8,7 @@ from context_router.evaluation.scoring import (
     is_refusal,
     is_refusal_requirement,
     normalize_for_matching,
+    requirement_reachability,
     requirement_satisfied,
     requirement_terms,
 )
@@ -150,3 +151,27 @@ def test_normalisation_does_not_make_unrelated_answers_match() -> None:
 
 def test_identifier_characters_survive_normalisation() -> None:
     assert normalize_for_matching("T2_CN.py") == "t2_cn.py"
+
+
+def test_reachability_measures_the_context_not_the_answer() -> None:
+    """The point of the metric: "was it shown" is a different question from "was it said"."""
+
+    requirements = ["覆盖 migration.py 的「锁升级」结论"]
+    memory = "…migration.py 的锁升级已经确认…"
+    answer = "我无法回答这个问题。"
+    assert requirement_reachability(requirements, memory) == 1.0
+    assert deterministic_coverage(requirements, answer) == 0.0
+
+
+def test_reachability_is_none_when_nothing_substantive_is_left() -> None:
+    """A refusal requirement is not a claim about evidence, so it is not reachable or not."""
+
+    assert requirement_reachability([REFUSAL_REQUIREMENT], "任何文本") is None
+    assert requirement_reachability([], "任何文本") is None
+    assert requirement_reachability([REFUSAL_REQUIREMENT, "覆盖「锁升级」"], "锁升级") == 1.0
+
+
+def test_reachability_does_not_credit_a_context_that_merely_declines() -> None:
+    """Scoring a refusal requirement against the memory would pass for the wrong reason."""
+
+    assert requirement_reachability([REFUSAL_REQUIREMENT], "上下文不足，无法回答") is None

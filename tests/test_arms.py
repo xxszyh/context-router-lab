@@ -1,7 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 
+from context_router.assembly import ContextBuilder
+from context_router.assembly.builder import (
+    EXCLUDE_RECENT_FROM_EVIDENCE,
+    RECENT_BUDGET_FRACTION,
+)
 from context_router.datasets import generate_synthetic_dataset
 from context_router.evaluation.arms import (
     ARM_NAMES,
@@ -12,6 +19,7 @@ from context_router.evaluation.arms import (
     evaluate_arms,
     first_gate,
     oracle_decision,
+    recency_reachability,
     run_arm,
 )
 from context_router.storage import SQLiteEventStore
@@ -271,11 +279,12 @@ def test_global_lexical_retrieval_beats_the_recent_window(
     cases: list[ArmCase], results: list[ArmCaseResult]
 ) -> None:
     summary = evaluate_arms(results)
-    assert (
-        summary["global_bm25"]["evidence_set_recall"]
-        > summary["query_recent_only"]["evidence_set_recall"]
-    )
-    assert summary["query_recent_only"]["evidence_set_recall"] < 1.0
+    global_recall = summary["global_bm25"]["evidence_set_recall"]
+    recent_recall = summary["query_recent_only"]["evidence_set_recall"]
+    # The synthetic dataset carries evidence sets on every case, so both are measured.
+    assert global_recall is not None and recent_recall is not None
+    assert global_recall > recent_recall
+    assert recent_recall < 1.0
     # The dataset must contain evidence the recent window cannot reach.
     far = [
         case
@@ -311,8 +320,11 @@ def test_evaluate_arms_reports_a_row_per_arm(results: list[ArmCaseResult]) -> No
         row = summary[name]
         assert row["count"] == len(results) / len(ARM_NAMES)
         assert row["future_leakage_total"] == 0.0
-        assert 0.0 <= row["evidence_set_recall"] <= 1.0
-        assert row["mean_memory_tokens"] > 0
+        recall = row["evidence_set_recall"]
+        assert recall is not None, "the synthetic dataset measures every case"
+        assert 0.0 <= recall <= 1.0
+        mean_tokens = row["mean_memory_tokens"]
+        assert mean_tokens is not None and mean_tokens > 0
         assert "median_memory_tokens" in row
 
 
@@ -321,11 +333,11 @@ def test_oracle_reduces_memory_tokens_on_the_synthetic_dataset(
 ) -> None:
     summary = evaluate_arms(results)
     reduction = summary["oracle_router"]["token_reduction_vs_full_history"]
+    full_tokens = summary["full_history"]["mean_memory_tokens"]
+    oracle_tokens = summary["oracle_router"]["mean_memory_tokens"]
+    assert reduction is not None and full_tokens is not None and oracle_tokens is not None
     assert 0.0 < reduction < 1.0
-    assert (
-        summary["full_history"]["mean_memory_tokens"]
-        > summary["oracle_router"]["mean_memory_tokens"]
-    )
+    assert full_tokens > oracle_tokens
 
 
 def test_hybrid_arm_reports_a_configured_router(cases: list[ArmCase]) -> None:
@@ -364,7 +376,8 @@ def test_full_history_outgrows_the_memory_budget(results: list[ArmCaseResult]) -
     """The dataset must be large enough that the budget actually constrains the arms."""
 
     summary = evaluate_arms(results)
-    assert summary["full_history"]["max_memory_tokens"] > 2048
+    max_tokens = summary["full_history"]["max_memory_tokens"]
+    assert max_tokens is not None and max_tokens > 2048
 
 
 def test_arm_cases_only_expose_contexts_that_already_exist(
@@ -415,3 +428,138 @@ def test_first_gate_stops_when_oracle_recall_degrades() -> None:
     assert gate["oracle_token_reduction"] == pytest.approx(0.6)
     assert gate["oracle_recall_not_worse_than_full_history"] is False
     assert gate["verdict"] == "stop"
+
+
+def test_default_assembly_profile_is_pinned() -> None:
+    """These two were literals inside `assemble`, so every published number rests on them.
+
+    Pinned the way `tests/test_relation.py` pins the keyword rules: a later change has to be a
+    deliberate one that re-derives the numbers, not an edit that quietly moves them.
+    """
+
+    assert RECENT_BUDGET_FRACTION == 0.15
+    assert EXCLUDE_RECENT_FROM_EVIDENCE is True
+    builder = ContextBuilder()
+    assert builder.recent_budget_fraction == RECENT_BUDGET_FRACTION
+    assert builder.exclude_recent_from_evidence is EXCLUDE_RECENT_FROM_EVIDENCE
+
+
+def test_the_recent_budget_binds_only_when_the_turns_are_long(cases: list[ArmCase]) -> None:
+    """Why the synthetic benchmark could never have found this.
+
+    Synthetic turns are short -- three of them cost ~135 tokens against a 307-token recent
+    allowance -- so every recent turn always fits and the fraction is invisible. The same is true
+    of the `--sessions 60` dataset this project publishes. On the real conversations the recent
+    window is capped and *does* bind, which is where the router's recency deficit comes from.
+
+    Recorded as a test because it is the concrete instance of the project's own rule: a benchmark
+    whose budget never binds cannot tell a broken assembly from a working one.
+    """
+
+    totals = {
+        fraction: sum(
+            len(
+                {event.event_id for event in case.recent_events[-3:]}
+                & set(
+                    run_arm(
+                        "hybrid_router",
+                        case,
+                        builder=ContextBuilder(recent_budget_fraction=fraction),
+                    ).included_event_ids
+                )
+            )
+            for case in cases
+        )
+        for fraction in (0.15, 1.0)
+    }
+    assert totals[0.15] == totals[1.0]
+
+
+def test_raising_the_recent_budget_admits_more_of_a_long_recent_window(
+    cases: list[ArmCase],
+) -> None:
+    """The knob has to be able to bind, or it is not a knob.
+
+    Lengthen the recent turns until they exceed the 15% allowance and the fraction starts to
+    decide what the model is shown -- which is the whole reason it is now a named parameter
+    rather than a literal.
+    """
+
+    case = cases[0]
+    body = "长" * 900
+    long_recent = [
+        event.model_copy(
+            update={
+                "content": body,
+                "content_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+            }
+        )
+        for event in case.recent_events[-3:]
+    ]
+    stretched = case.model_copy(update={"recent_events": long_recent})
+    recent_ids = {event.event_id for event in long_recent}
+
+    capped = run_arm(
+        "hybrid_router", stretched, builder=ContextBuilder(recent_budget_fraction=0.15)
+    )
+    uncapped = run_arm(
+        "hybrid_router", stretched, builder=ContextBuilder(recent_budget_fraction=1.0)
+    )
+
+    capped_shown = len(recent_ids & set(capped.included_event_ids))
+    uncapped_shown = len(recent_ids & set(uncapped.included_event_ids))
+    # A 15% allowance cannot hold even one turn of this size; the whole budget holds two, and the
+    # third is dropped by the total budget rather than by the recent allowance. Both bounds are
+    # the point: the fraction decides, and it is not the only thing that does.
+    assert capped_shown == 0
+    assert uncapped_shown >= 2
+
+
+def test_barring_the_recent_window_from_evidence_costs_tokens(cases: list[ArmCase]) -> None:
+    """The exclusion is not a no-op, and it is not only about de-duplication.
+
+    A recent turn that does not fit the recent allowance cannot be recovered by any channel when
+    the evidence channel is barred from it, so the two settings differ in what is admitted, not
+    only in how it is labelled.
+    """
+
+    def total(exclude: bool) -> int:
+        builder = ContextBuilder(exclude_recent_from_evidence=exclude)
+        return sum(run_arm("hybrid_router", case, builder=builder).memory_tokens for case in cases)
+
+    assert total(exclude=True) != total(exclude=False)
+
+
+def test_synthetic_benchmark_cannot_separate_recency_from_relevance(
+    cases: list[ArmCase],
+) -> None:
+    """The finding this diagnostic exists to surface, pinned so it cannot be forgotten.
+
+    On the committed synthetic dataset, recency reachability is a step function: every labelled
+    checkpoint of a recency-favourable type has its evidence inside the last three events, and
+    none of a recency-unfavourable type does. Such a type cannot separate a recency strategy from
+    a relevance strategy, so it is evidence about neither -- and "query_recent_only recovers only
+    46% of the labelled evidence" is then a statement about the generator, not about recency.
+
+    If the generator is ever changed so that a type mixes reachable and unreachable checkpoints,
+    this test fails and the doc that quotes that number has to be updated with it. That is the
+    intended behaviour.
+    """
+
+    rows = {row.query_type: row for row in recency_reachability(cases)}
+    assert rows["continue"].share == 1.0
+    assert rows["return"].share == 0.0
+    assert rows["switch"].share == 0.0
+    assert rows["cross_context"].share == 0.0
+    for query_type in ("continue", "return", "switch", "cross_context", "short_coreference"):
+        assert rows[query_type].definitional is True
+
+
+def test_a_type_with_no_labels_is_not_called_definitional(cases: list[ArmCase]) -> None:
+    """No measurement is not a verdict: `new_context` and `unanswerable` carry no evidence sets,
+    so their 0.0 share must not be reported as a type that recency structurally cannot serve."""
+
+    rows = {row.query_type: row for row in recency_reachability(cases)}
+    for query_type in ("new_context", "unanswerable"):
+        assert rows[query_type].labelled == 0
+        assert rows[query_type].definitional is False

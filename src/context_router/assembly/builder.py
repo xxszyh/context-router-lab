@@ -44,6 +44,27 @@ EVIDENCE_WEIGHTS = {"lexical": 0.45, "dense": 0.40, "relevance": 0.15}
 EVIDENCE_MAX_GROUPS_PER_CONTEXT: int | None = None
 EVIDENCE_SCORE_FLOOR = 0.5
 
+#: Share of the token budget the immediately-preceding turns may claim.
+#:
+#: This is a *design decision about how much recency is worth*, and until now it was a literal
+#: `0.15` inside `assemble`, so no experiment could vary it and no result recorded it. On the two
+#: real conversations it is the single largest measured difference between `hybrid_router` and
+#: `query_recent_only`: the baseline spends the whole budget on the last three turns and shows
+#: ~2.9 of them, while the router caps its recent section at ~307 of 2048 tokens and shows ~1.5.
+#: The router therefore *under-serves* recency on `continue`, which is the one query type where
+#: recency is the correct answer, and loses that cell 0-5 while winning nothing back on the
+#: `return`/`switch` cells it exists for. See `docs/recency-budget-2026-10-01.md`.
+RECENT_BUDGET_FRACTION = 0.15
+
+#: Whether the recent window is barred from the evidence channel.
+#:
+#: The exclusion was introduced with the "recency belongs in reranking, never in candidate
+#: retrieval" fix, and that rule is about the *retrieval query*, not about what the assembled
+#: context is allowed to contain. Excluding the recent events from evidence is defensible on its
+#: own -- it stops the same turn being shown twice -- but combined with a 15% recent budget it
+#: means a turn that does not fit the recent section cannot be recovered by any other channel.
+EXCLUDE_RECENT_FROM_EVIDENCE = True
+
 #: How many characters of an event's body survive into the indexed form. The index keeps every
 #: event's identity -- section, context, sequence, actor and kind -- and truncates only the
 #: prose, which is the trade the form makes: the model can see *that* a turn exists and what it
@@ -111,11 +132,19 @@ class ContextBuilder:
         token_counter: TokenCounter | None = None,
         render_mode: RenderMode = "prose",
         index_head_chars: int = INDEX_HEAD_CHARS,
+        recent_budget_fraction: float = RECENT_BUDGET_FRACTION,
+        exclude_recent_from_evidence: bool = EXCLUDE_RECENT_FROM_EVIDENCE,
     ) -> None:
         self.analyzer = analyzer or LexicalAnalyzer()
         self.token_counter = token_counter or TokenCounter()
         self.embedding = HashEmbeddingProvider(analyzer=self.analyzer)
         self.render_mode: RenderMode = render_mode
+        #: Sweepable for the same reason `index_head_chars` is: it is a claim about how much
+        #: recency is worth, and a claim that cannot be varied cannot be tested. Unlike
+        #: `index_head_chars` it *does* change the admitted set, which is exactly why it has to
+        #: be a named, recorded parameter rather than a literal.
+        self.recent_budget_fraction = recent_budget_fraction
+        self.exclude_recent_from_evidence = exclude_recent_from_evidence
         #: Sweepable, because how much of a body survives is the parameter that decides what the
         #: indexed form can still support -- including whether the model can tell that its
         #: grounds are insufficient.
@@ -157,7 +186,7 @@ class ContextBuilder:
             causal_events=causal_events,
             context_by_event=context_by_event,
             relevance_by_pair=relevance_by_pair,
-            excluded_event_ids=recent_ids,
+            excluded_event_ids=recent_ids if self.exclude_recent_from_evidence else set(),
         )
 
         selected_blocks: list[_Block] = []
@@ -174,7 +203,7 @@ class ContextBuilder:
             else:
                 dropped.append({"context_id": block.context_id, "reason": "token_budget"})
 
-        recent_target = max(math.floor(request.token_budget * 0.15), 1)
+        recent_target = max(math.floor(request.token_budget * self.recent_budget_fraction), 1)
         recent_used = 0
         chosen_recent: list[_Block] = []
         for block in reversed(recent_blocks):

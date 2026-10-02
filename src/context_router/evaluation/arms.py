@@ -14,6 +14,7 @@ beat.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from statistics import mean, median
 from typing import Literal, Protocol
@@ -21,7 +22,7 @@ from typing import Literal, Protocol
 from pydantic import Field
 
 from context_router.assembly import assemble_context, assemble_indexed_context
-from context_router.assembly.builder import TokenCounter
+from context_router.assembly.builder import ContextBuilder, TokenCounter
 from context_router.domain import (
     AssemblyRequest,
     BenchmarkQuery,
@@ -37,6 +38,7 @@ from context_router.domain import (
     WorkingContext,
 )
 from context_router.evaluation.metrics import evidence_set_recall
+from context_router.evaluation.scoring import requirement_reachability
 from context_router.providers.embedding import HashEmbeddingProvider, cosine
 from context_router.retrieval import BM25Index, LexicalAnalyzer
 from context_router.routing import ContextRouter
@@ -133,7 +135,13 @@ class ArmCaseResult(Contract):
     memory_tokens: int = Field(ge=0)
     total_input_tokens: int = Field(ge=0)
     token_budget: int = Field(ge=1)
-    evidence_set_recall: float = Field(ge=0.0, le=1.0)
+    #: `None` when the case carries no acceptable evidence sets -- unmeasured, not perfect.
+    evidence_set_recall: float | None = None
+    #: Share of substantive requirements whose terms are present in the assembled memory: an
+    #: upper bound on what any answer drawn from it could score. `None` when the checkpoint has
+    #: no substantive requirements, or carries none at all (real replay labels nothing here for
+    #: the checkpoints whose correct behaviour is a refusal). Unmeasured, not zero.
+    requirement_reachability: float | None = None
     future_leakage: int = Field(ge=0)
     decision: Decision
     confidence: float = Field(ge=0.0, le=1.0)
@@ -475,11 +483,33 @@ def _result(arm: ArmName, case: ArmCase, built: ArmAssembly) -> ArmCaseResult:
         evidence_set_recall=evidence_set_recall(
             case.acceptable_evidence_sets, built.included_event_ids
         ),
+        requirement_reachability=requirement_reachability(
+            case.answer_requirements, built.rendered_text
+        ),
         future_leakage=len(included - causal),
         decision=built.decision,
         confidence=built.confidence,
         routing_trace_id=built.trace_id,
         router_profile=built.router_profile,
+    )
+
+
+def describe_builder(builder: ContextBuilder) -> str:
+    """A stable label for the assembly profile a result was produced with.
+
+    Same rule as ``describe_router``, and for the same reason: `RECENT_BUDGET_FRACTION` used to
+    be a literal inside `assemble`, so every result this project has published was produced under
+    a parameter that appeared in no artifact. A number that cannot name its own configuration
+    cannot be compared with a later one.
+    """
+
+    return "|".join(
+        (
+            f"render={builder.render_mode}",
+            f"head={builder.index_head_chars}",
+            f"recent_fraction={builder.recent_budget_fraction}",
+            f"exclude_recent={builder.exclude_recent_from_evidence}",
+        )
     )
 
 
@@ -531,6 +561,7 @@ def assemble_arm(
     counter: TokenCounter | None = None,
     router: ContextRouter | None = None,
     index_head_chars: int | None = None,
+    builder: ContextBuilder | None = None,
 ) -> ArmAssembly:
     """Build the memory one arm would show the main model for one checkpoint.
 
@@ -539,6 +570,11 @@ def assemble_arm(
 
     ``index_head_chars`` applies to ``indexed_router`` only and changes how much of each body
     survives. It does not change the selection, which is what makes it safe to sweep.
+
+    ``builder`` overrides the assembly profile for the routing arms. Unlike ``index_head_chars``
+    this *does* change the admitted set -- it is how the recent-budget question is asked -- so a
+    caller that passes one must record which one it passed, exactly as ``describe_router`` does
+    for the router.
     """
 
     tokens = counter or TokenCounter()
@@ -632,18 +668,20 @@ def assemble_arm(
     # `indexed_router` is `hybrid_router` with the rendering changed and nothing else: same
     # router, same decision, same events, same order. Holding the selection fixed is the point
     # -- it is what makes the pair an ablation of *form* rather than a second routing strategy.
-    assembled = (
-        assemble_indexed_context(request, decision, head_chars=index_head_chars)
-        if name == "indexed_router"
-        else assemble_context(request, decision)
-    )
+    if name == "indexed_router":
+        assembled = assemble_indexed_context(request, decision, head_chars=index_head_chars)
+    elif builder is not None:
+        assembled = builder.assemble(request, decision)
+    else:
+        assembled = assemble_context(request, decision)
     return finish(
         _from_working_context(assembled),
         decision.selected_context_ids,
         decision=decision.decision,
         confidence=decision.confidence,
         trace_id=decision.trace_id,
-        profile=profile if name != "indexed_router" else f"{profile}+index",
+        profile=(profile if name != "indexed_router" else f"{profile}+index")
+        + (f"|{describe_builder(builder)}" if builder is not None else ""),
     )
 
 
@@ -654,25 +692,56 @@ def run_arm(
     counter: TokenCounter | None = None,
     router: ContextRouter | None = None,
     index_head_chars: int | None = None,
+    builder: ContextBuilder | None = None,
 ) -> ArmCaseResult:
     """Score a single comparison arm on a single checkpoint."""
 
     return _result(
         name,
         case,
-        assemble_arm(name, case, counter=counter, router=router, index_head_chars=index_head_chars),
+        assemble_arm(
+            name,
+            case,
+            counter=counter,
+            router=router,
+            index_head_chars=index_head_chars,
+            builder=builder,
+        ),
     )
 
 
-def evaluate_arms(results: list[ArmCaseResult]) -> dict[str, dict[str, float]]:
-    """Aggregate arm results into one comparable row per arm."""
+def _mean_of_measured(values: Iterable[float | None]) -> float | None:
+    """Average the values that exist, and say so when none do.
+
+    A metric that is `None` for unmeasured cases must not be averaged in as a zero,
+    and an arm whose every case is unmeasured has no mean -- not a mean of zero.
+    """
+
+    present = [value for value in values if value is not None]
+    return mean(present) if present else None
+
+
+def _recall_not_worse(candidate: float | None, reference: float | None) -> bool:
+    """A gate cannot pass on a metric that neither arm was measured on."""
+
+    if candidate is None or reference is None:
+        return False
+    return candidate >= reference - 1e-9
+
+
+def evaluate_arms(results: list[ArmCaseResult]) -> dict[str, dict[str, float | None]]:
+    """Aggregate arm results into one comparable row per arm.
+
+    A value is `None` where the metric was not measured for any case in the arm --
+    see `evidence_set_recall`. It is not zero and must not be read as one.
+    """
 
     if not results:
         raise ValueError("at least one arm result is required")
     grouped: dict[str, list[ArmCaseResult]] = defaultdict(list)
     for result in results:
         grouped[result.arm].append(result)
-    summary: dict[str, dict[str, float]] = {}
+    summary: dict[str, dict[str, float | None]] = {}
     for arm, rows in grouped.items():
         tokens = [float(row.memory_tokens) for row in rows]
         summary[arm] = {
@@ -681,18 +750,80 @@ def evaluate_arms(results: list[ArmCaseResult]) -> dict[str, dict[str, float]]:
             "median_memory_tokens": float(median(tokens)),
             "max_memory_tokens": max(tokens),
             "mean_total_input_tokens": mean(float(row.total_input_tokens) for row in rows),
-            "evidence_set_recall": mean(row.evidence_set_recall for row in rows),
+            "evidence_set_recall": _mean_of_measured(row.evidence_set_recall for row in rows),
+            "requirement_reachability": _mean_of_measured(
+                row.requirement_reachability for row in rows
+            ),
             "future_leakage_total": float(sum(row.future_leakage for row in rows)),
             "abstention_rate": mean(float(row.decision == "abstain") for row in rows),
         }
     reference = summary.get("full_history", {}).get("mean_memory_tokens")
     if reference:
         for row in summary.values():
-            row["token_reduction_vs_full_history"] = 1.0 - row["mean_memory_tokens"] / reference
+            row_tokens = row["mean_memory_tokens"]
+            if row_tokens is not None:
+                row["token_reduction_vs_full_history"] = 1.0 - row_tokens / reference
     return summary
 
 
-def first_gate(summary: dict[str, dict[str, float]]) -> dict[str, object]:
+class RecencyReachability(Contract):
+    """How much of a benchmark's labelled evidence the recency window can reach, by query type.
+
+    This is a property of the *benchmark*, and it is the check whose absence let a
+    self-confirming benchmark look like an empirical result for two weeks.
+
+    On the committed synthetic dataset the numbers are a step function: 100% of `continue` and
+    `short_coreference` checkpoints have their labelled evidence inside the last three events,
+    and 0% of `cross_context`, `return` and `switch` checkpoints do. That is not a finding about
+    recency -- it is the generator writing the project's own hypothesis into the labels. So
+    "`query_recent_only` recovers only 46% of the labelled evidence" is a statement about the
+    generator, and it cannot be evidence for or against routing. A benchmark whose recency
+    reachability is 0% or 100% within every query type can only confirm what it was built to
+    confirm, however many checkpoints it has.
+
+    Reported per query type rather than pooled, because a mix is what makes the pooled number
+    look like a measurement. `share` is over the checkpoints that carry labels at all.
+    """
+
+    query_type: str
+    checkpoints: int
+    labelled: int
+    reachable: int
+    share: float = Field(ge=0.0, le=1.0)
+    #: True when every labelled checkpoint of this type is reachable or none is: the type cannot
+    #: separate a recency strategy from a relevance strategy, so it is evidence about neither.
+    definitional: bool
+
+
+def recency_reachability(cases: list[ArmCase]) -> list[RecencyReachability]:
+    """Per query type, whether the labelled evidence sits inside the recency window."""
+
+    grouped: dict[str, list[ArmCase]] = defaultdict(list)
+    for case in cases:
+        grouped[case.query_type].append(case)
+    rows: list[RecencyReachability] = []
+    for query_type in sorted(grouped):
+        labelled = [case for case in grouped[query_type] if case.acceptable_evidence_sets]
+        reachable = 0
+        for case in labelled:
+            window = {event.event_id for event in case.recent_events[-RECENT_TURNS:]}
+            if any(set(option) & window for option in case.acceptable_evidence_sets):
+                reachable += 1
+        total = len(labelled)
+        rows.append(
+            RecencyReachability(
+                query_type=query_type,
+                checkpoints=len(grouped[query_type]),
+                labelled=total,
+                reachable=reachable,
+                share=reachable / total if total else 0.0,
+                definitional=bool(total) and reachable in (0, total),
+            )
+        )
+    return rows
+
+
+def first_gate(summary: dict[str, dict[str, float | None]]) -> dict[str, object]:
     """Decide whether selective context is worth a real router at all.
 
     Gate one is deliberately answerable offline: it compares memory tokens and evidence
@@ -705,8 +836,9 @@ def first_gate(summary: dict[str, dict[str, float]]) -> dict[str, object]:
     if full is None or oracle is None:
         raise KeyError("first_gate requires the full_history and oracle_router arms")
     reference = full["mean_memory_tokens"]
-    reduction = 1.0 - oracle["mean_memory_tokens"] / reference if reference else 0.0
-    recall_ok = oracle["evidence_set_recall"] >= full["evidence_set_recall"] - 1e-9
+    oracle_tokens = oracle["mean_memory_tokens"]
+    reduction = 1.0 - oracle_tokens / reference if reference and oracle_tokens is not None else 0.0
+    recall_ok = _recall_not_worse(oracle["evidence_set_recall"], full["evidence_set_recall"])
     token_ok = reduction >= TOKEN_REDUCTION_TARGET
     return {
         "oracle_token_reduction": reduction,

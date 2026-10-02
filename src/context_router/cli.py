@@ -10,7 +10,8 @@ from typing import Annotated, Any, cast
 
 import typer
 
-from context_router.assembly import assemble_context
+from context_router.assembly import ContextBuilder, assemble_context
+from context_router.assembly.builder import TokenCounter
 from context_router.datasets import (
     AnswerAdjudicationSet,
     SecondaryAnswerAnnotationSet,
@@ -36,12 +37,14 @@ from context_router.evaluation import (
     answer_one,
     build_answer_cases,
     build_arm_cases,
+    describe_builder,
     describe_router,
     evaluate_answers,
     evaluate_arms,
     evaluate_routes,
     first_gate,
     quality_token_frontier,
+    recency_reachability,
     run_arm,
     run_pairwise_judging,
     summarise_judge_strata,
@@ -60,6 +63,24 @@ from context_router.evaluation.necessity import (
     control_failures,
     required_from_ablations,
     run_ablations,
+)
+from context_router.external.scale_qa import (
+    STRATA_BASELINE,
+    WINDOW_SIZES,
+    WindowRetriever,
+    arrangement_reachability,
+    baseline_solved_mask,
+    build_embedder,
+    candidate_order_attribution,
+    difficulty_strata,
+    routing_miss_decomposition,
+    window_blocks,
+)
+from context_router.external.scale_qa import (
+    arrange as arrange_scale_qa,
+)
+from context_router.external.scale_qa import (
+    load_package as load_scale_qa_package,
 )
 from context_router.importers import import_claude_code
 from context_router.providers import HashEmbeddingProvider
@@ -80,6 +101,17 @@ app = typer.Typer(no_args_is_help=True, help="Context routing research harness."
 def _write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _mean_of_optional(values: list[float | None]) -> float | None:
+    """Average what was measured, and say so when nothing was.
+
+    The same rule as `evaluation.arms._mean_of_measured`: an unmeasured checkpoint is not a zero,
+    and a group with no measurement has no mean.
+    """
+
+    present = [value for value in values if value is not None]
+    return sum(present) / len(present) if present else None
 
 
 def _read_benchmark(path: Path) -> list[BenchmarkQuery]:
@@ -853,6 +885,103 @@ def compare_baselines_command(
     typer.echo(str(output))
 
 
+@app.command("sweep-assembly")
+def sweep_assembly_command(
+    database: Annotated[Path, typer.Argument()],
+    benchmark: Annotated[Path, typer.Argument()],
+    output: Annotated[Path, typer.Argument()],
+    token_budget: Annotated[int, typer.Option(min=32)] = 2048,
+    recent_fraction: Annotated[list[float] | None, typer.Option()] = None,
+    include_recent_in_evidence: Annotated[bool, typer.Option()] = False,
+    ranker_file: Annotated[Path | None, typer.Option()] = None,
+    policy_file: Annotated[Path | None, typer.Option()] = None,
+) -> None:
+    """Sweep the assembly profile, and report what the benchmark can and cannot decide.
+
+    Two things were literals inside `assemble` until now: the share of the budget the
+    immediately-preceding turns may claim, and whether those turns are barred from the evidence
+    channel. Both are claims about how much recency is worth, neither appeared in any artifact,
+    and on the two real conversations the first is the largest measured difference between
+    `hybrid_router` and `query_recent_only` -- the baseline shows ~2.9 of the last three turns
+    and the router ~1.5, because 15% of 2048 tokens is not enough to hold them.
+
+    This command varies them and reports, per configuration and per query type: memory tokens,
+    evidence-set recall, and requirement reachability -- the share of substantive requirements
+    whose terms are present in the assembled memory, which upper-bounds what any answer drawn
+    from it could score and so separates "the model did not say it" from "the model was never
+    shown it".
+
+    It also reports the benchmark's own recency reachability, because a sweep over recency is
+    meaningless on a benchmark that decides the recency question in its labels. Where every
+    checkpoint of a query type is reachable or none is, that type is evidence about neither
+    strategy, and the payload says so rather than averaging it in.
+    """
+
+    store = SQLiteEventStore(database)
+    ranker = PlattContextRanker.load(ranker_file) if ranker_file else None
+    policy = RoutingPolicy(**json.loads(policy_file.read_text())) if policy_file else None
+    router = ContextRouter(ranker=ranker, policy=policy)
+    cases = build_arm_cases(store, _read_benchmark(benchmark), token_budget=token_budget)
+
+    fractions = recent_fraction or [0.15, 0.30, 0.50, 1.00]
+    exclusions = [True, False] if include_recent_in_evidence else [True]
+
+    rows: list[dict[str, Any]] = []
+    for fraction in fractions:
+        for exclude in exclusions:
+            builder = ContextBuilder(
+                recent_budget_fraction=fraction,
+                exclude_recent_from_evidence=exclude,
+            )
+            for arm in ("query_recent_only", "hybrid_router", "oracle_router"):
+                results = [run_arm(arm, case, router=router, builder=builder) for case in cases]
+                summary = evaluate_arms(results)
+                row = summary[arm]
+                by_type: dict[str, list[float | None]] = {}
+                for case, result in zip(cases, results, strict=True):
+                    by_type.setdefault(case.query_type, []).append(result.requirement_reachability)
+                rows.append(
+                    {
+                        "arm": arm,
+                        "profile": describe_builder(builder),
+                        "recent_budget_fraction": fraction,
+                        "exclude_recent_from_evidence": exclude,
+                        "mean_memory_tokens": row["mean_memory_tokens"],
+                        "evidence_set_recall": row["evidence_set_recall"],
+                        "requirement_reachability": row["requirement_reachability"],
+                        "requirement_reachability_by_query_type": {
+                            query_type: _mean_of_optional(values)
+                            for query_type, values in sorted(by_type.items())
+                        },
+                    }
+                )
+
+            def _fmt(value: object) -> str:
+                # Unmeasured is not zero, and must not print as one.
+                return f"{value:.3f}" if isinstance(value, float) else "n/a"
+
+            typer.echo(
+                f"recent_fraction={fraction:<5} exclude_recent={exclude!s:<5} "
+                + "  ".join(
+                    f"{row['arm'].split('_')[0]}={_fmt(row['requirement_reachability'])}"
+                    for row in rows[-3:]
+                )
+            )
+
+    payload = {
+        "schema_version": "1.0",
+        "token_budget": token_budget,
+        "router_profile": describe_router(router),
+        "checkpoints": len(cases),
+        "benchmark_recency_reachability": [
+            row.model_dump(mode="json") for row in recency_reachability(cases)
+        ],
+        "sweep": rows,
+    }
+    _write_json(output, payload)
+    typer.echo(str(output))
+
+
 @app.command("train-ranker")
 def train_ranker(
     benchmark_results: Annotated[Path, typer.Argument()],
@@ -1035,6 +1164,190 @@ def report_command(
         append_stage_table("By expected relation", "Expected relation", stages.get("by_relation"))
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    typer.echo(str(output))
+
+
+@app.command("scale-qa")
+def scale_qa_command(
+    package: Annotated[
+        Path, typer.Argument(help="SCALE-QA runtime package root or runtime/<mode>")
+    ],
+    output: Annotated[Path, typer.Argument(help="JSON report")],
+    arrangement: Annotated[
+        str, typer.Option(help="blocks | interleaved | shuffled")
+    ] = "interleaved",
+    seed: Annotated[int, typer.Option()] = 20260420,
+    window_size: Annotated[list[int] | None, typer.Option()] = None,
+    depth: Annotated[int, typer.Option(min=1)] = 5,
+    mode: Annotated[list[str] | None, typer.Option()] = None,
+    limit: Annotated[int, typer.Option(min=0, help="Cap questions; 0 means all")] = 0,
+    embedder_name: Annotated[str, typer.Option("--embedder", help="hash | lsa")] = "hash",
+) -> None:
+    """Measure this project against SCALE-QA, an external benchmark it did not build.
+
+    Two tables, both offline and free. The first is the arrangement's recency reachability: a
+    share of 0.0 or 1.0 means the arrangement decided the recency question in advance, and the
+    numbers below it are then evidence about the arrangement rather than about any method. The
+    second is exact-evidence recall at a fixed retrieval depth, which is checkable by string
+    search because SCALE-QA copies each question's evidence out of its own dialogue.
+
+    Each window also reports its **difficulty strata**, because the pooled recall above is an
+    average over questions of unknown difficulty and on this benchmark a single lexical lookup
+    already answers most of them. A question is solved when one unit returned by `lexical` at
+    depth 1 already contains all its evidence; the recall on the solved part measures the
+    benchmark, and only the unsolved part measures the arms.
+
+    When `router` is among the modes, that unsolved part is then decomposed into **candidate
+    misses** (the evidence was never offered) and **selection losses** (it was offered and was not
+    returned), which is the difference between a retrieval problem and a ranking one.
+
+    The dense channel is the hashing placeholder unless a provider is wired in, so `dense` and
+    `hybrid` measure the placeholder and are not offered by default. `lexical` is a real
+    baseline; `router` is this project's calibrated ranker and relation classifier over the same
+    window set, which is the comparison the adapter exists for.
+    """
+
+    loaded = load_scale_qa_package(package)
+    questions = loaded.questions[:limit] if limit else loaded.questions
+    counter = TokenCounter()
+    analyzer = LexicalAnalyzer()
+    sizes = tuple(window_size) if window_size else WINDOW_SIZES
+    modes = mode or ["lexical", "router"]
+
+    def show(value: float | None) -> str:
+        return "unmeasured" if value is None else f"{value:.3f}"
+
+    blocks = arrange_scale_qa(loaded, arrangement=arrangement, seed=seed)  # type: ignore[arg-type]
+    reach = arrangement_reachability(
+        blocks,
+        questions,
+        counter=counter,
+        arrangement=arrangement,
+        seed=seed,
+        window_sizes=sizes,
+    )
+    typer.echo(
+        f"arrangement={arrangement} seed={seed}  stream={reach.stream_tokens} tokens "
+        f"({reach.truth_tokens / max(reach.stream_tokens, 1):.1%} truth)  "
+        f"median distance from end={reach.median_distance_from_end:.0f}"
+    )
+    degenerate = all(share in (0.0, 1.0) for share in reach.reachable_within_window.values())
+    if degenerate:
+        typer.echo(
+            "  NOTE: every swept window reaches the same share (0% or 100%). This arrangement "
+            "cannot separate a recency strategy from a relevance one."
+        )
+    for size, share in sorted(reach.reachable_within_window.items()):
+        typer.echo(f"  recency reachability at a trailing {size}-token window: {share:.1%}")
+
+    rows: list[dict[str, Any]] = []
+    difficulty: list[dict[str, Any]] = []
+    router_detail: list[dict[str, Any]] = []
+    router_ordering: list[dict[str, Any]] = []
+    for size in sizes:
+        windows = window_blocks(blocks, size=size, counter=counter)
+        # Fitted per window set: the corpus *is* the window set, so two window sizes do not share
+        # an embedding space.
+        embedder = build_embedder(embedder_name, windows, analyzer=analyzer)
+        # `lexical` is built even when it is not being reported: it defines the difficulty split,
+        # and one BM25 index over the window set is cheap beside the router arm. One retriever per
+        # mode is built here and used for both the pooled score and the strata, so the two are the
+        # same measurement rather than two runs that agree by luck.
+        retrievers = {
+            name: WindowRetriever(
+                windows,
+                mode=name,  # type: ignore[arg-type]
+                analyzer=analyzer,
+                embedder=embedder,
+            )
+            for name in dict.fromkeys([*modes, STRATA_BASELINE])
+        }
+        for name in modes:
+            metrics = retrievers[name].evaluate(questions, depth=depth)
+            rows.append({"window": size, "mode": name, "windows": len(windows), **metrics})
+            typer.echo(
+                f"  window={size:<5} mode={name:<8} units={len(windows):<6} "
+                f"all-evidence recall@{depth} = {metrics['all_evidence_recall']:.3f}  "
+                f"mean = {metrics['mean_evidence_recall']:.3f}"
+            )
+
+        report = difficulty_strata(questions, retrievers, depth=depth, baseline=STRATA_BASELINE)
+        difficulty.append({"window": size, "windows": len(windows), **asdict(report)})
+        unsolved = report.questions - report.solved_by_baseline
+        typer.echo(
+            f"  difficulty strata, window={size}: {STRATA_BASELINE}@{report.baseline_depth} "
+            f"already answers {report.solved_by_baseline}/{report.questions} "
+            f"({report.solved_share:.1%}); the remaining {unsolved} are what the arms are for"
+        )
+        for stratum in report.strata:
+            typer.echo(
+                f"    {stratum.mode:<8} pooled {stratum.recall_pooled:.3f}   "
+                f"solved {show(stratum.recall_on_solved)}   "
+                f"unsolved {show(stratum.recall_on_unsolved)}"
+            )
+
+        if "router" in retrievers:
+            # Only the questions a cheap lookup does not already answer can say anything about the
+            # router, so the decomposition runs there rather than over the whole set, where it
+            # would be 84% a restatement of the benchmark. The hard subset is routed a second time,
+            # which is why this is done over 164 questions and not 1,000.
+            solved_mask = baseline_solved_mask(questions, retrievers, baseline=STRATA_BASELINE)
+            hard = tuple(
+                question
+                for question, is_solved in zip(questions, solved_mask, strict=True)
+                if not is_solved
+            )
+            decomposition = routing_miss_decomposition(hard, retrievers["router"], depth=depth)
+            router_detail.append({"window": size, **asdict(decomposition)})
+            share = (
+                decomposition.recovered / decomposition.questions
+                if decomposition.questions
+                else 0.0
+            )
+            typer.echo(
+                f"    router on the {decomposition.questions} unsolved: recovered "
+                f"{decomposition.recovered} ({share:.1%}), selection loss "
+                f"{decomposition.selection_loss}, candidate miss {decomposition.candidate_miss}"
+            )
+            if decomposition.no_evidence_window:
+                typer.echo(
+                    f"      {decomposition.no_evidence_window} of the candidate misses have no "
+                    "single unit holding the evidence at this window size"
+                )
+
+            # A second pass over the same 164 questions: the candidate list is held fixed and only
+            # the ordering field changes, which is what attributes the loss to a pipeline stage
+            # rather than to "the ranker".
+            ordering = candidate_order_attribution(hard, retrievers["router"], depth=depth)
+            router_ordering.append({"window": size, **asdict(ordering)})
+            orders = "  ".join(f"{o.field} {o.recall_at_depth:.3f}" for o in ordering.orderings)
+            typer.echo(f"    router ordering over the same candidates: {orders}")
+            typer.echo(
+                f"      a perfect pick of any {depth} from the same list: "
+                f"{ordering.oracle_at_depth:.3f}"
+            )
+
+    _write_json(
+        output,
+        {
+            # 1.1 adds `difficulty` (the split by whether one cheap lookup already answers a
+            # question) and `router_decomposition` (candidate miss against selection loss). The
+            # pooled `results` rows are unchanged and still the same measurement.
+            "schema_version": "1.1",
+            "benchmark": "SCALE-QA",
+            "package": str(package),
+            "questions": len(questions),
+            "arrangement": arrangement,
+            "seed": seed,
+            "depth": depth,
+            "embedder": embedder_name,
+            "arrangement_reachability": asdict(reach),
+            "difficulty": difficulty,
+            "router_decomposition": router_detail,
+            "router_ordering": router_ordering,
+            "results": rows,
+        },
+    )
     typer.echo(str(output))
 
 

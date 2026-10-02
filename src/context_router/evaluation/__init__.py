@@ -14,11 +14,14 @@ from context_router.evaluation.arms import (
     ArmCase,
     ArmCaseResult,
     ArmName,
+    RecencyReachability,
     build_arm_cases,
+    describe_builder,
     describe_router,
     evaluate_arms,
     first_gate,
     oracle_decision,
+    recency_reachability,
     run_arm,
 )
 from context_router.evaluation.judge import (
@@ -39,7 +42,11 @@ from context_router.evaluation.metrics import (
     evidence_set_recall,
     paired_bootstrap_delta,
 )
-from context_router.evaluation.scoring import deterministic_coverage, requirement_terms
+from context_router.evaluation.scoring import (
+    deterministic_coverage,
+    requirement_reachability,
+    requirement_terms,
+)
 
 __all__ = [
     "ARM_NAMES",
@@ -55,12 +62,14 @@ __all__ = [
     "ArmCase",
     "ArmCaseResult",
     "ArmName",
+    "RecencyReachability",
     "RouteCaseResult",
     "answer_one",
     "assemble_arm",
     "build_answer_cases",
     "build_arm_cases",
     "build_judge_prompt",
+    "describe_builder",
     "describe_router",
     "deterministic_coverage",
     "evaluate_answers",
@@ -71,6 +80,8 @@ __all__ = [
     "oracle_decision",
     "paired_bootstrap_delta",
     "quality_token_frontier",
+    "recency_reachability",
+    "requirement_reachability",
     "requirement_terms",
     "run_pairwise_judging",
     "summarise_judge_strata",

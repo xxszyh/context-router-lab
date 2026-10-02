@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+from collections.abc import Sequence
 from typing import Protocol
 
 from context_router.retrieval import LexicalAnalyzer
@@ -41,3 +42,113 @@ class HashEmbeddingProvider:
 
 def cosine(left: list[float], right: list[float]) -> float:
     return sum(a * b for a, b in zip(left, right, strict=True))
+
+
+class LsaEmbeddingProvider:
+    """A fitted distributional embedding: real semantics, offline, deterministic.
+
+    `HashEmbeddingProvider` is a placeholder with no semantics at all, which is why this project
+    has never measured its dense path (limitation 2 in the README). A neural encoder would be the
+    obvious replacement, but the obvious ones need either a model download or an API endpoint, and
+    neither is available in an offline run.
+
+    This fits TF-IDF followed by a truncated SVD on a corpus and normalises the result. That is a
+    genuine distributional embedding -- terms that occur in similar contexts land near each other,
+    which is exactly what hashing cannot do -- and it is deterministic given the corpus.
+
+    Two things it is not, and both matter for reading a result produced with it. It is not a
+    neural sentence encoder, so it does not carry the paraphrase behaviour a transformer does. And
+    it is **fitted on the corpus it is then used to retrieve over**, which is the same
+    characteristic TF-IDF itself has and means the dense arm is not measuring transfer to unseen
+    text. A real pinned encoder is still the right answer; `OpenAICompatibleEmbeddingProvider`
+    takes one, and swapping to it is a one-argument change in `external/scale_qa.py`.
+    """
+
+    def __init__(
+        self,
+        corpus: Sequence[str],
+        *,
+        dimensions: int = 256,
+        analyzer: LexicalAnalyzer | None = None,
+    ) -> None:
+        from sklearn.decomposition import TruncatedSVD
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.pipeline import make_pipeline
+        from sklearn.preprocessing import Normalizer
+
+        self.analyzer = analyzer or LexicalAnalyzer()
+        documents = [text for text in corpus if text.strip()]
+        if not documents:
+            raise ValueError("a non-empty corpus is required to fit the embedding")
+        vectorizer = TfidfVectorizer(
+            tokenizer=self.analyzer.tokens,
+            token_pattern=None,
+            lowercase=False,
+            min_df=1,
+        )
+        matrix = vectorizer.fit_transform(documents)
+        # A truncated SVD cannot keep more components than the matrix has columns. Clamping here
+        # rather than raising keeps a small corpus usable -- which a test fixture and a small
+        # window set both are -- and the effective width is what `model_version` reports, so a
+        # result never claims a dimension it did not use.
+        effective = max(1, min(dimensions, matrix.shape[1] - 1))
+        self.dimensions = effective
+        self.model_version = f"lsa-tfidf-svd{effective}-v1"
+        self._model = make_pipeline(
+            TfidfVectorizer(
+                tokenizer=self.analyzer.tokens,
+                token_pattern=None,
+                lowercase=False,
+                min_df=1,
+            ),
+            TruncatedSVD(n_components=effective, random_state=0),
+            Normalizer(copy=False),
+        )
+        self._model.fit(documents)
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        return [[float(value) for value in row] for row in self._model.transform(texts)]
+
+
+class StaticNeuralEmbeddingProvider:
+    """A pinned neural encoder that needs no GPU and no API.
+
+    Wraps a `model2vec` static embedding model: a sentence encoder distilled into a lookup table,
+    so it runs on CPU at tokenisation speed while keeping the encoder's semantics. It is a real
+    neural embedding, which is what `HashEmbeddingProvider` is not and what `LsaEmbeddingProvider`
+    approximates without being one -- this is the provider that answers whether the dense channel
+    helps, rather than measuring a placeholder or a bag-of-words factorisation.
+
+    The model is fetched once and cached locally. Where the model hub is unreachable, set
+    ``HF_ENDPOINT`` to a mirror before constructing this; the default hub times out from some
+    networks and a mirror is reachable from the same machine.
+
+    Two limits worth stating with any result it produces. The default model is English-centric,
+    so it is a fair encoder for an English benchmark and not for this project's mixed-language
+    replay data. And it is *static*: no attention, so it does not carry word-order or long-range
+    behaviour a transformer does. It is a much better dense retriever than hashing and a weaker
+    one than the encoder it was distilled from.
+    """
+
+    def __init__(
+        self,
+        model: str = "minishlab/potion-base-8M",
+        *,
+        analyzer: LexicalAnalyzer | None = None,
+    ) -> None:
+        try:
+            from model2vec import StaticModel
+        except ImportError as error:  # pragma: no cover - depends on the optional extra
+            raise ImportError(
+                "the neural embedder needs the optional extra: pip install -e '.[neural]'"
+            ) from error
+        self.analyzer = analyzer or LexicalAnalyzer()
+        self._model = StaticModel.from_pretrained(model)
+        self.model_version = f"static-neural:{model}"
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        return [[float(value) for value in row] for row in self._model.encode(texts)]

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from collections import OrderedDict
 from dataclasses import dataclass
 
 from context_router.domain import (
@@ -58,6 +59,7 @@ class ContextRouter:
         analyzer: LexicalAnalyzer | None = None,
         policy: RoutingPolicy | None = None,
         ranker: CandidateRanker | None = None,
+        index_cache_size: int = 0,
     ) -> None:
         self.analyzer = analyzer or LexicalAnalyzer()
         self.embedding_provider = embedding_provider or HashEmbeddingProvider(
@@ -66,8 +68,21 @@ class ContextRouter:
         self.relation_classifier = relation_classifier or RuleRelationClassifier()
         self.policy = policy or RoutingPolicy()
         self.ranker = ranker or HeuristicContextRanker()
+        #: Prepared catalogs, keyed by a caller-supplied key. Off by default, because a cache that
+        #: is on by default is a correctness hazard for every existing caller; the adapter that
+        #: needs it (`external/scale_qa.py`) asks for it explicitly and passes a key that is
+        #: stable for its window set.
+        #:
+        #: What is cached is the tokenised BM25 index and the context vectors -- both functions of
+        #: the catalog alone. Ranking stays per query, because it depends on the query and is the
+        #: part that has to happen every time. Rebuilding the index per call is what made a
+        #: 1,000-question sweep over 2,810 windows take an hour.
+        self.index_cache_size = index_cache_size
+        self._prepared: OrderedDict[str, tuple[BM25Index, list[str], list[list[float]], str]] = (
+            OrderedDict()
+        )
 
-    def route(self, request: RouteRequest) -> RouteDecision:
+    def route(self, request: RouteRequest, *, cache_key: str | None = None) -> RouteDecision:
         relation, relation_probabilities = self.relation_classifier.classify(request)
         contexts = {context.context_id: context for context in request.context_catalog}
         if not contexts:
@@ -78,18 +93,38 @@ class ContextRouter:
         # concatenating it here lets the context being left dominate BM25 and the dense
         # channel, which is precisely the context stickiness the plan warns about.
         retrieval_query = request.query
-        lexical_index = BM25Index(
-            {key: value.searchable_text() for key, value in contexts.items()},
-            analyzer=self.analyzer,
-        )
+        prepared = self._prepared.get(cache_key) if cache_key else None
+        if prepared is None:
+            lexical_index = BM25Index(
+                {key: value.searchable_text() for key, value in contexts.items()},
+                analyzer=self.analyzer,
+            )
+            context_ids = list(contexts)
+            context_vectors = self.embedding_provider.embed(
+                [contexts[context_id].searchable_text() for context_id in context_ids]
+            )
+            # The version hash serialises every context, which is the single most expensive
+            # thing `route` does on a large catalog -- 2,810 windows is roughly 2MB of JSON per
+            # call. It is a function of the catalog, so it is cached with it rather than
+            # recomputed on every query.
+            prepared = (
+                lexical_index,
+                context_ids,
+                context_vectors,
+                self._index_version(request.context_catalog),
+            )
+            if cache_key and self.index_cache_size > 0:
+                self._prepared[cache_key] = prepared
+                self._prepared.move_to_end(cache_key)
+                while len(self._prepared) > self.index_cache_size:
+                    self._prepared.popitem(last=False)
+        else:
+            self._prepared.move_to_end(cache_key)  # type: ignore[arg-type]
+        lexical_index, context_ids, context_vectors, index_version = prepared
         lexical_values = lexical_index.rank(retrieval_query, self.policy.top_per_retriever)
         lexical_scores = dict(lexical_values)
 
         query_vector = self.embedding_provider.embed([retrieval_query])[0]
-        context_ids = list(contexts)
-        context_vectors = self.embedding_provider.embed(
-            [contexts[context_id].searchable_text() for context_id in context_ids]
-        )
         dense_scores = {
             context_id: max(0.0, cosine(query_vector, vector))
             for context_id, vector in zip(context_ids, context_vectors, strict=True)
@@ -183,7 +218,7 @@ class ContextRouter:
             confidence=confidence,
             fallback_level=0 if decision == "route" else 1,
             trace_id=new_uuid7(),
-            index_version=self._index_version(request.context_catalog),
+            index_version=index_version,
             model_versions={
                 "embedding": self.embedding_provider.model_version,
                 "relation": self.relation_classifier.model_version,
