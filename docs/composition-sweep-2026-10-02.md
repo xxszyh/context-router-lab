@@ -81,6 +81,10 @@ the window count without competing; evidence inflates it by competing.
 1. **"Candidate generation is not the bottleneck" is a statement about corpus size, and it was
    written without one.** It is true at 1,000 evidence dialogues (0.131) and false at 3,000 (0.246).
    The sentence appears in `docs/discriminating-set-2026-10-02.md` and is qualified there.
+   **And corpus size matters only because the candidate budget is a hand-set constant**:
+   `docs/candidate-budget-2026-10-02.md` widens `top_per_retriever` and `max_candidates`, at which
+   point the 0.115 gap above becomes 0.006 and the front end stops being a bottleneck at all -- and
+   widening it does not improve recall@5 either, which is the part that matters.
 2. **The number is now reported rather than left to the reader to infer.** `ArrangementReachability`
    carries `truth_blocks`, and `ctxlab scale-qa` prints it in the header beside the truth share:
 
