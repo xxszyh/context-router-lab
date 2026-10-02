@@ -584,7 +584,8 @@ Four things follow, and the last two are decisions rather than tasks.
    `docs/fusion-weights-2026-10-02.md` records a fusion repair that measures as zero benefit for
    exactly that reason. Both diagnostics are permanent CLI output (`router_decomposition`,
    `router_ordering`), so the larger sample can be judged against the same two tables instead of
-   against a pooled score.
+   against a pooled score -- and it was: `docs/discriminating-set-2026-10-02.md` runs the same three
+   comparisons on 602 discriminating questions and reports each with its paired interval.
 
 ```bash
 # reproduce every number above, offline, no API key

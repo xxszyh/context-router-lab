@@ -20,6 +20,9 @@ from context_router.external.scale_qa import (
     difficulty_strata,
     evidence_recall,
     load_package,
+    ordering_hits,
+    ordering_report,
+    paired_ordering_comparison,
     retrieve,
     routing_miss_decomposition,
     window_blocks,
@@ -584,6 +587,11 @@ def test_the_cli_reports_the_difficulty_split_beside_the_pooled_score(
     assert ordering["oracle_at_depth"] >= max(
         row["recall_at_depth"] for row in ordering["orderings"]
     )
+    # A point estimate without its paired interval is what got a published sentence withdrawn.
+    assert "paired " in result.output
+    assert ordering["paired"], "the report must carry the comparisons, not only the rows"
+    for comparison in ordering["paired"]:
+        assert comparison["bootstrap_low"] <= comparison["bootstrap_high"]
 
 
 # --- the decomposition of 2026-10-02: a retrieval miss and a ranking miss are different ---
@@ -690,3 +698,63 @@ def test_the_ordering_attribution_refuses_an_arm_that_ranks_nothing() -> None:
     retriever = _lexical_retriever(_STRATUM_WINDOWS, analyzer)
     with pytest.raises(ValueError, match="router"):
         candidate_order_attribution((), retriever)
+
+
+def _router_over_stratum(
+    analyzer: LexicalAnalyzer,
+) -> tuple[WindowRetriever, tuple[ScaleQaQuestion, ...]]:
+    windows = [
+        ScaleQaWindow(f"w{index}", text, index, len(text.split()))
+        for index, text in enumerate(_STRATUM_WINDOWS)
+    ]
+    router = WindowRetriever(
+        windows, mode="router", analyzer=analyzer, embedder=_embedder(analyzer)
+    )
+    questions = (
+        _question("a", "otters lichen", "secondary material concerning otters"),
+        _question("b", "falcon decoy", "a registry entry about the northern goshawk"),
+        _question("c", "tidal barrages", "a discussion of tidal barrages"),
+    )
+    return router, questions
+
+
+def test_the_paired_comparison_agrees_with_the_rows_it_came_from() -> None:
+    """The interval and the point estimate have to come out of the same routing pass."""
+
+    analyzer = LexicalAnalyzer()
+    router, questions = _router_over_stratum(analyzer)
+    hits = ordering_hits(questions, router, depth=2)
+    report = ordering_report(hits, depth=2)
+    by_field = {o.field: o.recall_at_depth for o in report.orderings}
+    comparisons = paired_ordering_comparison(hits, resamples=200)
+
+    assert comparisons, "the default comparisons should all have been measured"
+    for comparison in comparisons:
+        assert comparison.difference == pytest.approx(
+            by_field[comparison.left] - by_field[comparison.right]
+        )
+        assert comparison.questions == report.questions
+        assert 0.0 <= comparison.exact_mcnemar_p <= 1.0
+        assert comparison.bootstrap_low <= comparison.bootstrap_high
+        # Only the disagreements carry information.
+        assert comparison.left_wins + comparison.right_wins <= comparison.questions
+
+
+def test_an_ordering_compared_with_itself_is_not_a_result() -> None:
+    analyzer = LexicalAnalyzer()
+    router, questions = _router_over_stratum(analyzer)
+    hits = ordering_hits(questions, router, depth=2)
+    comparison = paired_ordering_comparison(hits, (("rrf_score", "rrf_score"),), resamples=100)[0]
+
+    assert comparison.difference == 0.0
+    assert comparison.left_wins == 0
+    assert comparison.right_wins == 0
+    assert comparison.exact_mcnemar_p == 1.0
+
+
+def test_a_comparison_needs_both_orderings_measured() -> None:
+    analyzer = LexicalAnalyzer()
+    router, questions = _router_over_stratum(analyzer)
+    hits = ordering_hits(questions, router, depth=2, fields=("rrf_score",))
+    with pytest.raises(ValueError, match="measured"):
+        paired_ordering_comparison(hits, (("rrf_score", "lexical_rank"),))

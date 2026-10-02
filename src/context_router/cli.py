@@ -71,8 +71,10 @@ from context_router.external.scale_qa import (
     arrangement_reachability,
     baseline_solved_mask,
     build_embedder,
-    candidate_order_attribution,
     difficulty_strata,
+    ordering_hits,
+    ordering_report,
+    paired_ordering_comparison,
     routing_miss_decomposition,
     window_blocks,
 )
@@ -1317,15 +1319,38 @@ def scale_qa_command(
 
             # A second pass over the same 164 questions: the candidate list is held fixed and only
             # the ordering field changes, which is what attributes the loss to a pipeline stage
-            # rather than to "the ranker".
-            ordering = candidate_order_attribution(hard, retrievers["router"], depth=depth)
-            router_ordering.append({"window": size, **asdict(ordering)})
+            # rather than to "the ranker". The hits are kept so the point estimates and the paired
+            # intervals come out of one routing pass, rather than the table being quotable without
+            # the test that qualifies it.
+            hits = ordering_hits(hard, retrievers["router"], depth=depth)
+            ordering = ordering_report(hits, depth=depth)
+            comparisons = paired_ordering_comparison(hits)
+            router_ordering.append(
+                {
+                    "window": size,
+                    **asdict(ordering),
+                    "paired": [asdict(comparison) for comparison in comparisons],
+                }
+            )
             orders = "  ".join(f"{o.field} {o.recall_at_depth:.3f}" for o in ordering.orderings)
             typer.echo(f"    router ordering over the same candidates: {orders}")
             typer.echo(
                 f"      a perfect pick of any {depth} from the same list: "
                 f"{ordering.oracle_at_depth:.3f}"
             )
+            for comparison in comparisons:
+                verdict = (
+                    "a direction, not a result"
+                    if comparison.bootstrap_low <= 0.0 <= comparison.bootstrap_high
+                    else "established"
+                )
+                interval = f"{comparison.bootstrap_low:+.3f}, {comparison.bootstrap_high:+.3f}"
+                typer.echo(
+                    f"      paired {comparison.left} - {comparison.right}: "
+                    f"{comparison.difference:+.3f} "
+                    f"({comparison.left_wins} won, {comparison.right_wins} lost, "
+                    f"p={comparison.exact_mcnemar_p:.3f}, 95% [{interval}]) -- {verdict}"
+                )
 
     _write_json(
         output,

@@ -35,6 +35,7 @@ change, and the module says so rather than silently reporting a placeholder as d
 from __future__ import annotations
 
 import importlib.util
+import math
 import random
 import re
 from collections.abc import Mapping, Sequence
@@ -81,6 +82,15 @@ ORDERING_FIELDS: tuple[str, ...] = (
 #: The subset of those where lower is better and a missing value means "this channel never
 #: retrieved it", which sorts last rather than first.
 RANK_ORDERING_FIELDS: tuple[str, ...] = ("lexical_rank", "dense_rank", "entity_rank")
+
+#: The head-to-head comparisons every ordering report should carry, named here rather than chosen
+#: per report so a report cannot pick a flattering pair: the fusion against the strongest single
+#: channel, and the calibrated order against each of them.
+ORDERING_COMPARISONS: tuple[tuple[str, str], ...] = (
+    ("calibrated_probability", "lexical_rank"),
+    ("rrf_score", "lexical_rank"),
+    ("calibrated_probability", "rrf_score"),
+)
 
 
 @dataclass(frozen=True)
@@ -779,6 +789,161 @@ def _ordered_candidates(
     return sorted(candidates, key=lambda c: (-(_ordering_value(c, field) or 0.0), c.context_id))
 
 
+@dataclass(frozen=True)
+class OrderingHits:
+    """Per-question exact-evidence hits for each ordering, plus the list's own ceiling.
+
+    The primitive both ordering reports share: `ordering_report` averages it and
+    `paired_ordering_comparison` pairs it. It exists so that one router pass can produce a point
+    estimate *and* the interval that qualifies it, because a published sentence in this project had
+    to be withdrawn for quoting the first without the second.
+    """
+
+    questions: int
+    fields: dict[str, list[int]]
+    oracle: list[int]
+    candidate_size_median: float | None
+
+
+@dataclass(frozen=True)
+class PairedComparison:
+    """Two orderings of the same candidates, tested against each other rather than against zero.
+
+    ``difference`` is ``left - right`` over the same questions. The discordant counts are the whole
+    of the evidence: a question both orderings answer, or neither, says nothing about which is
+    better. ``exact_mcnemar_p`` is two-sided on those counts and ``bootstrap_95`` resamples
+    questions with replacement, so a difference whose interval crosses zero is a direction and not
+    a result -- at 164 questions the ordering differences in this project were exactly that.
+    """
+
+    left: str
+    right: str
+    questions: int
+    difference: float
+    left_wins: int
+    right_wins: int
+    exact_mcnemar_p: float
+    bootstrap_low: float
+    bootstrap_high: float
+
+
+def _exact_mcnemar(left_wins: int, right_wins: int) -> float:
+    """Two-sided exact binomial on the discordant pairs, without a statistics dependency."""
+
+    count = left_wins + right_wins
+    if count == 0:
+        return 1.0
+    observed = float(sum(math.comb(count, k) for k in range(0, min(left_wins, right_wins) + 1)))
+    tail = observed / float(2**count)
+    return min(1.0, 2.0 * tail)
+
+
+def ordering_hits(
+    questions: tuple[ScaleQaQuestion, ...],
+    retriever: WindowRetriever,
+    *,
+    depth: int = RETRIEVAL_DEPTH,
+    fields: Sequence[str] = ORDERING_FIELDS,
+) -> OrderingHits:
+    """Order the router's own candidate list by each field and record, per question, whether the
+    evidence came back. One router pass, however many fields are asked for."""
+
+    if retriever.mode != "router":
+        raise ValueError(f"the ordering comparison needs the router arm, not {retriever.mode!r}")
+    normalized = {window.window_id: _normalize(window.text) for window in retriever.windows}
+    hits: dict[str, list[int]] = {field: [] for field in fields}
+    oracle: list[int] = []
+    sizes: list[int] = []
+    for question in questions:
+        _, decision = retriever.retrieve_with_decision(question.query, depth=depth)
+        if decision is None:
+            for field in fields:
+                hits[field].append(0)
+            oracle.append(0)
+            continue
+        candidates = [c for c in decision.candidates if c.context_id in retriever.by_id]
+        sizes.append(len(candidates))
+        evidence = [_normalize(item) for item in question.expected_doc]
+        gold = {key for key, text in normalized.items() if all(item in text for item in evidence)}
+        for field in fields:
+            ordered = _ordered_candidates(candidates, field)[:depth]
+            assembled = "\n".join(retriever.documents[c.context_id] for c in ordered)
+            hits[field].append(int(evidence_recall(question, assembled) == 1.0))
+        oracle.append(int(bool(gold & {c.context_id for c in candidates})))
+    return OrderingHits(
+        questions=len(questions),
+        fields=hits,
+        oracle=oracle,
+        candidate_size_median=float(sorted(sizes)[len(sizes) // 2]) if sizes else None,
+    )
+
+
+def ordering_report(hits: OrderingHits, *, depth: int = RETRIEVAL_DEPTH) -> OrderingReport:
+    """Average `ordering_hits` into the table, keeping the ceiling from the same pass."""
+
+    count = hits.questions
+    return OrderingReport(
+        questions=count,
+        depth=depth,
+        candidate_size_median=hits.candidate_size_median,
+        orderings=tuple(
+            OrderingAttribution(
+                field=field,
+                questions=count,
+                recall_at_depth=sum(values) / count if count else 0.0,
+            )
+            for field, values in hits.fields.items()
+        ),
+        oracle_at_depth=sum(hits.oracle) / count if count else 0.0,
+    )
+
+
+def paired_ordering_comparison(
+    hits: OrderingHits,
+    comparisons: Sequence[tuple[str, str]] = ORDERING_COMPARISONS,
+    *,
+    seed: int = 20260420,
+    resamples: int = 20000,
+) -> tuple[PairedComparison, ...]:
+    """Test each pair of orderings against each other on the questions they disagree about."""
+
+    rng = random.Random(seed)
+    count = hits.questions
+    out: list[PairedComparison] = []
+    for left, right in comparisons:
+        if left not in hits.fields or right not in hits.fields:
+            raise ValueError(f"{left!r} and {right!r} must both have been measured")
+        pairs = list(zip(hits.fields[left], hits.fields[right], strict=True))
+        left_wins = sum(1 for a, b in pairs if a == 1 and b == 0)
+        right_wins = sum(1 for a, b in pairs if a == 0 and b == 1)
+        difference = (
+            sum(a for a, _ in pairs) / count - sum(b for _, b in pairs) / count if count else 0.0
+        )
+        if count:
+            draws: list[float] = []
+            for _ in range(resamples):
+                sample = [pairs[rng.randrange(count)] for _ in range(count)]
+                draws.append(sum(a for a, _ in sample) / count - sum(b for _, b in sample) / count)
+            draws.sort()
+            low, high = draws[int(0.025 * resamples)], draws[int(0.975 * resamples)]
+        else:
+            low = high = 0.0
+        out.append(
+            PairedComparison(
+                left=left,
+                right=right,
+                questions=count,
+                difference=difference,
+                left_wins=left_wins,
+                right_wins=right_wins,
+                exact_mcnemar_p=_exact_mcnemar(left_wins, right_wins),
+                bootstrap_low=low,
+                bootstrap_high=high,
+            )
+        )
+    return tuple(out)
+
+
 def candidate_order_attribution(
     questions: tuple[ScaleQaQuestion, ...],
     retriever: WindowRetriever,
@@ -788,45 +953,12 @@ def candidate_order_attribution(
 ) -> OrderingReport:
     """Recall of the router's own candidate list under each ordering field, in one router pass.
 
-    Run it on the hard subset. On SCALE-QA's 164 unsolved questions the lexical channel scores
-    0.640 over the router's own candidates, the equal-weight fusion 0.567 and the calibrated order
-    0.628, against 0.848 for a perfect pick of five from the same list.
+    Run it on the hard subset, and read it with `paired_ordering_comparison` over the same hits:
+    the rows of this table are one draw, and the differences between them need their intervals.
     """
 
-    if retriever.mode != "router":
-        raise ValueError(f"the attribution needs the router arm, not {retriever.mode!r}")
-    normalized = {window.window_id: _normalize(window.text) for window in retriever.windows}
-    totals = {field: 0.0 for field in fields}
-    sizes: list[int] = []
-    oracle = 0.0
-    for question in questions:
-        _, decision = retriever.retrieve_with_decision(question.query, depth=depth)
-        if decision is None:
-            continue
-        candidates = [c for c in decision.candidates if c.context_id in retriever.by_id]
-        sizes.append(len(candidates))
-        evidence = [_normalize(item) for item in question.expected_doc]
-        gold = {key for key, text in normalized.items() if all(item in text for item in evidence)}
-        for field in fields:
-            ordered = _ordered_candidates(candidates, field)[:depth]
-            totals[field] += evidence_recall(
-                question, "\n".join(retriever.documents[c.context_id] for c in ordered)
-            )
-        oracle += float(bool(gold & {c.context_id for c in candidates}))
-    count = len(questions)
-    return OrderingReport(
-        questions=count,
-        depth=depth,
-        candidate_size_median=float(sorted(sizes)[len(sizes) // 2]) if sizes else None,
-        orderings=tuple(
-            OrderingAttribution(
-                field=field,
-                questions=count,
-                recall_at_depth=totals[field] / count if count else 0.0,
-            )
-            for field in fields
-        ),
-        oracle_at_depth=oracle / count if count else 0.0,
+    return ordering_report(
+        ordering_hits(questions, retriever, depth=depth, fields=fields), depth=depth
     )
 
 
