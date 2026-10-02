@@ -14,6 +14,13 @@ The project does not try to be another memory OS or vector-RAG framework. It exi
 measure whether **selective context assembly** is worth building at all, and only then to
 build it.
 
+> **The project is closed as a router and kept as a record.** The token half is established and
+> stronger than the claim; the quality half is a null result, and the benchmarks could not have
+> shown otherwise. Read **[`docs/termination-2026-10-02.md`](docs/termination-2026-10-02.md)**
+> first: it states what was established, every explanation that was proposed and refuted, and the
+> two open items. To find out whether *your* benchmark can answer the question you are asking it:
+> `ctxlab audit <package>` ([`docs/audit-2026-10-02.md`](docs/audit-2026-10-02.md)).
+
 ---
 
 ## The problem

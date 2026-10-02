@@ -69,9 +69,11 @@ from context_router.external.scale_qa import (
     WINDOW_SIZES,
     WindowRetriever,
     arrangement_reachability,
+    audit_benchmark,
     baseline_solved_mask,
     build_embedder,
     difficulty_strata,
+    is_established,
     ordering_hits,
     ordering_report,
     paired_ordering_comparison,
@@ -1341,9 +1343,7 @@ def scale_qa_command(
             )
             for comparison in comparisons:
                 verdict = (
-                    "a direction, not a result"
-                    if comparison.bootstrap_low <= 0.0 <= comparison.bootstrap_high
-                    else "established"
+                    "established" if is_established(comparison) else "a direction, not a result"
                 )
                 interval = f"{comparison.bootstrap_low:+.3f}, {comparison.bootstrap_high:+.3f}"
                 typer.echo(
@@ -1375,6 +1375,57 @@ def scale_qa_command(
         },
     )
     typer.echo(str(output))
+
+
+@app.command("audit")
+def audit_command(
+    package: Annotated[
+        Path, typer.Argument(help="SCALE-QA runtime package root or runtime/<mode>")
+    ],
+    arrangement: Annotated[
+        str, typer.Option(help="blocks | interleaved | shuffled")
+    ] = "interleaved",
+    seed: Annotated[int, typer.Option()] = 20260420,
+    window_size: Annotated[int, typer.Option()] = 256,
+    depth: Annotated[int, typer.Option(min=1)] = 5,
+    embedder_name: Annotated[
+        str, typer.Option("--embedder", help="hash | lsa | neural")
+    ] = "neural",
+    limit: Annotated[int, typer.Option(min=0, help="Cap questions; 0 means all")] = 0,
+) -> None:
+    """Ask whether a benchmark can answer the question a routing report is about to ask it.
+
+    The five diagnostics this project built, judged in one step against thresholds declared in the
+    module rather than chosen per report: whether the arrangement decided the recency question
+    itself, how much of the benchmark one cheap lookup already answers, whether there are enough
+    competitors for a fixed retrieval depth to run out, how much of the candidate list's own ceiling
+    the best ordering leaves unclaimed, and whether each difference is resolvable at this sample
+    size. Run it before quoting any number from the same package.
+    """
+
+    audit = audit_benchmark(
+        package,
+        arrangement=arrangement,  # type: ignore[arg-type]
+        seed=seed,
+        window=window_size,
+        depth=depth,
+        embedder_name=embedder_name,
+        limit=limit,
+    )
+    typer.echo(
+        f"{audit.package}\n"
+        f"  arrangement={audit.arrangement} seed={seed} window={audit.window} depth={audit.depth}"
+    )
+    typer.echo(
+        f"  {audit.units} retrieval units, {audit.truth_blocks} evidence-bearing dialogues, "
+        f"{audit.questions} questions, {audit.discriminating} of them discriminating"
+    )
+    typer.echo("")
+    for finding in audit.findings:
+        label = {"pass": "PASS  ", "caveat": "CAVEAT", "fail": "FAIL  "}[finding.verdict]
+        typer.echo(f"  {label}  {finding.check}: {finding.detail}")
+    typer.echo("")
+    typer.echo(f"  verdict: {audit.headline}")
 
 
 if __name__ == "__main__":

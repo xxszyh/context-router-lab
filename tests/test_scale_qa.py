@@ -776,3 +776,179 @@ def test_a_comparison_needs_both_orderings_measured() -> None:
     hits = ordering_hits(questions, router, depth=2, fields=("rrf_score",))
     with pytest.raises(ValueError, match="measured"):
         paired_ordering_comparison(hits, (("rrf_score", "lexical_rank"),))
+
+
+# --- the audit: five instruments, one judgement, against thresholds declared in the module ---
+
+
+def test_the_audit_fails_an_arrangement_that_decides_the_recency_question(
+    package: ScaleQaPackage,
+) -> None:
+    """Truth-then-noise puts every answer at the far end, so the recency question is settled."""
+
+    from context_router.external.scale_qa import audit_benchmark
+
+    audit = audit_benchmark(
+        Path(package.source), arrangement="blocks", window=64, depth=2, embedder_name="hash"
+    )
+    arrangement_finding = next(
+        finding for finding in audit.findings if finding.check == "arrangement reaches the evidence"
+    )
+    assert arrangement_finding.verdict == "fail"
+    assert "decided the recency question" in arrangement_finding.detail
+    assert "cannot answer the question as asked" in audit.headline
+    assert audit.failed
+
+
+def test_the_audit_caveats_a_benchmark_that_is_too_small_to_fail(package: ScaleQaPackage) -> None:
+    """Two evidence dialogues against a depth of five is not a regime where a depth runs out."""
+
+    from context_router.external.scale_qa import audit_benchmark
+
+    audit = audit_benchmark(
+        Path(package.source), arrangement="interleaved", window=64, depth=2, embedder_name="hash"
+    )
+    corpus_finding = next(
+        finding
+        for finding in audit.findings
+        if finding.check == "enough competitors for a fixed depth to run out"
+    )
+    assert corpus_finding.verdict == "caveat"
+    assert "nothing can be decomposed" in corpus_finding.detail
+    assert audit.truth_blocks == len(package.truth) == 2
+    assert audit.caveats
+
+
+def test_the_audit_records_every_ordering_difference_with_its_interval(tmp_path: Path) -> None:
+    """A point estimate without its test is what got a published sentence withdrawn."""
+
+    from context_router.external.scale_qa import audit_benchmark
+
+    # One answerable question and one whose query shares no term with its evidence, so the audit has
+    # a discriminating subset to measure the ordering stage on.
+    runtime = tmp_path / "pkg" / "runtime" / "full_corpus"
+    runtime.mkdir(parents=True)
+    (runtime / "test_cases.py").write_text(
+        "GROUND_TRUTH_HISTORY = " + repr(_TRUTH) + "\n"
+        "EVALUATION_QUERIES = [\n"
+        "    {'name': 'easy', 'query': 'Which stain does the Aegis-7 protocol forbid?',\n"
+        "     'expected_doc': ['The Aegis-7 protocol forbids acidified silver stains.'],\n"
+        "     'expected_answer_keywords': 'A', 'topic': 'Biomed', 'creator': 'codex',\n"
+        "     'global_id': 'codex:Biomed-001'},\n"
+        "    {'name': 'hard', 'query': 'otters lichen',\n"
+        "     'expected_doc': ['The margin was restated after the Nova-Life write-off.'],\n"
+        "     'expected_answer_keywords': 'C', 'topic': 'Finance', 'creator': 'claude-code',\n"
+        "     'global_id': 'claude-code:Finance-001'},\n"
+        "]\n",
+        encoding="utf-8",
+    )
+    (runtime / "processed_noise.py").write_text("NOISE = " + repr(_NOISE) + "\n", encoding="utf-8")
+
+    audit = audit_benchmark(
+        tmp_path / "pkg", arrangement="interleaved", window=64, depth=2, embedder_name="hash"
+    )
+    assert audit.discriminating == 1
+    resolvable = [f for f in audit.findings if f.check.startswith("difference is resolvable")]
+    assert resolvable, "the audit must carry the paired comparisons, not only the point estimates"
+    for finding in resolvable:
+        assert "p=" in finding.detail and "95%" in finding.detail
+
+
+def test_the_audit_says_so_when_nothing_discriminates(package: ScaleQaPackage) -> None:
+    """A benchmark where every question is already answered cannot report on the ranking stage."""
+
+    from context_router.external.scale_qa import audit_benchmark
+
+    audit = audit_benchmark(
+        Path(package.source), arrangement="interleaved", window=64, depth=2, embedder_name="hash"
+    )
+    assert audit.discriminating == 0
+    ordering_finding = next(
+        finding
+        for finding in audit.findings
+        if finding.check == "the ordering stage is not the whole gap"
+    )
+    assert ordering_finding.verdict == "caveat"
+    assert "could not be measured" in ordering_finding.detail
+
+
+def test_a_difference_is_established_only_when_both_tests_agree() -> None:
+    """A discrete bootstrap can exclude zero on three discordant pairs; McNemar has to agree.
+
+    Found by running the audit on a 50-question package: `rrf_score - lexical_rank` came back with a
+    bootstrap interval of [-0.833, -0.167] and an exact McNemar p of 0.250. The interval excluded
+    zero because with three discordant pairs no resample can straddle it -- a property of the
+    resampling, not evidence about the difference. Requiring both tests is what makes the label
+    honest, and it is why `is_established` exists rather than the interval alone.
+    """
+
+    from context_router.external.scale_qa import (
+        ESTABLISHED_P,
+        PairedComparison,
+        is_established,
+    )
+
+    narrow = PairedComparison(
+        left="a",
+        right="b",
+        questions=6,
+        difference=-0.500,
+        left_wins=0,
+        right_wins=3,
+        exact_mcnemar_p=0.250,
+        bootstrap_low=-0.833,
+        bootstrap_high=-0.167,
+    )
+    assert not is_established(narrow), "an interval that cannot straddle zero is not significance"
+
+    real = PairedComparison(
+        left="a",
+        right="b",
+        questions=602,
+        difference=-0.085,
+        left_wins=43,
+        right_wins=94,
+        exact_mcnemar_p=0.000,
+        bootstrap_low=-0.123,
+        bootstrap_high=-0.048,
+    )
+    assert is_established(real)
+
+    straddling = PairedComparison(
+        left="a",
+        right="b",
+        questions=602,
+        difference=0.010,
+        left_wins=30,
+        right_wins=28,
+        exact_mcnemar_p=0.001,
+        bootstrap_low=-0.010,
+        bootstrap_high=0.020,
+    )
+    assert not is_established(straddling)
+    assert ESTABLISHED_P == 0.05
+
+
+def test_the_audit_command_prints_a_verdict(package: ScaleQaPackage) -> None:
+    from typer.testing import CliRunner
+
+    from context_router.cli import app
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "audit",
+            package.source,
+            "--arrangement",
+            "interleaved",
+            "--window-size",
+            "64",
+            "--depth",
+            "2",
+            "--embedder",
+            "hash",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "verdict:" in result.output
+    assert "CAVEAT" in result.output or "FAIL" in result.output

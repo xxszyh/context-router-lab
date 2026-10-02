@@ -83,6 +83,237 @@ ORDERING_FIELDS: tuple[str, ...] = (
 #: retrieved it", which sorts last rather than first.
 RANK_ORDERING_FIELDS: tuple[str, ...] = ("lexical_rank", "dense_rank", "entity_rank")
 
+#: Thresholds the audit judges against. They are declared here, once, so that a report cannot pick
+#: the rule that flatters it -- the same reason `ORDERING_COMPARISONS` is a module constant.
+#:
+#: `SOLVED_SHARE_CEILING`: above this, most of the benchmark is answered by one cheap lookup and a
+#: pooled comparison between arms is mostly a statement about the benchmark.
+#: `CORPUS_TO_DEPTH_RATIO`: below this many competing units per retrieved slot, the front-end and
+#: selection stages cannot be separated -- ten competitors against a depth of five is not a regime
+#: where a fixed depth runs out (measured: saturated at zero miss).
+#: `RANKING_HEADROOM_CEILING`: how much of the candidate list's own ceiling the best available
+#: ordering may leave unclaimed before the ranking stage is named the bottleneck.
+SOLVED_SHARE_CEILING = 0.75
+CORPUS_TO_DEPTH_RATIO = 25
+RANKING_HEADROOM_CEILING = 0.20
+
+#: A difference counts as established only when **both** tests agree: the bootstrap interval
+#: excludes zero and the exact McNemar p clears this. Requiring both is conservative, and the pair
+#: is what caught a six-question sample whose interval excluded zero at p = 0.25 -- a discrete
+#: bootstrap over three discordant pairs can produce an interval that never contains zero, which is
+#: a property of the resampling and not evidence about the difference.
+ESTABLISHED_P = 0.05
+
+
+def is_established(comparison: PairedComparison, *, alpha: float = ESTABLISHED_P) -> bool:
+    """Whether a paired difference is a result rather than a direction."""
+
+    excludes_zero = not (comparison.bootstrap_low <= 0.0 <= comparison.bootstrap_high)
+    return excludes_zero and comparison.exact_mcnemar_p < alpha
+
+
+@dataclass(frozen=True)
+class AuditFinding:
+    """One benchmark property, judged against a declared threshold."""
+
+    check: str
+    verdict: Literal["pass", "caveat", "fail"]
+    detail: str
+    value: float | None
+
+
+@dataclass(frozen=True)
+class BenchmarkAudit:
+    """Whether a benchmark can answer the question a report is about to ask it.
+
+    Five instruments, one judgement. Each of them exists because a claim published from this project
+    had to be withdrawn, so the audit's job is to fail loudly on the properties whose absence let
+    that happen: an arrangement that decides the recency question in advance, a benchmark that one
+    lookup already answers, too few competitors for a fixed depth to run out, and an ordering
+    difference quoted without the interval that qualifies it.
+    """
+
+    package: str
+    arrangement: str
+    window: int
+    depth: int
+    questions: int
+    truth_blocks: int
+    units: int
+    discriminating: int
+    findings: tuple[AuditFinding, ...]
+
+    @property
+    def failed(self) -> tuple[AuditFinding, ...]:
+        return tuple(finding for finding in self.findings if finding.verdict == "fail")
+
+    @property
+    def caveats(self) -> tuple[AuditFinding, ...]:
+        return tuple(finding for finding in self.findings if finding.verdict == "caveat")
+
+    @property
+    def headline(self) -> str:
+        if self.failed:
+            failures = len(self.failed)
+            return f"this benchmark cannot answer the question as asked ({failures} failure(s))"
+        if self.caveats:
+            return f"usable, with {len(self.caveats)} caveat(s) that must travel with the numbers"
+        return "no objection found"
+
+
+def audit_benchmark(
+    package_root: Path,
+    *,
+    arrangement: Arrangement = "interleaved",
+    seed: int = 20260420,
+    window: int = 256,
+    depth: int = RETRIEVAL_DEPTH,
+    embedder_name: str = "neural",
+    limit: int = 0,
+) -> BenchmarkAudit:
+    """Run the five instruments over one package and judge the result against declared thresholds.
+
+    One pass per instrument; the router sees the discriminating subset only, which is the part that
+    can decide anything. Everything it reports is also available separately -- this exists so that
+    the checks cannot be skipped by quoting a pooled score from a report that ran only some of them.
+    """
+
+    counter = TokenCounter()
+    analyzer = LexicalAnalyzer()
+    package = load_package(package_root)
+    questions = package.questions[:limit] if limit else package.questions
+    blocks = arrange(package, arrangement=arrangement, seed=seed)
+    windows = window_blocks(blocks, size=window, counter=counter)
+    embedder = build_embedder(embedder_name, windows, analyzer=analyzer)
+
+    findings: list[AuditFinding] = []
+
+    reach = arrangement_reachability(
+        blocks,
+        questions,
+        counter=counter,
+        arrangement=arrangement,
+        seed=seed,
+        window_sizes=(window,),
+    )
+    shares = tuple(reach.reachable_within_window.values())
+    degenerate = all(share in (0.0, 1.0) for share in shares)
+    findings.append(
+        AuditFinding(
+            check="arrangement reaches the evidence",
+            verdict="fail" if degenerate else "pass",
+            detail=(
+                "every swept window reaches the same share, so the arrangement decided the recency "
+                "question before any method ran"
+                if degenerate
+                else f"trailing {window}-token window reaches "
+                f"{shares[0] if shares else 0.0:.1%} of the evidence"
+            ),
+            value=shares[0] if shares else None,
+        )
+    )
+
+    lexical = WindowRetriever(windows, mode="lexical", analyzer=analyzer, embedder=embedder)
+    router = WindowRetriever(windows, mode="router", analyzer=analyzer, embedder=embedder)
+    retrievers = {STRATA_BASELINE: lexical, "router": router}
+    report = difficulty_strata(questions, retrievers, depth=depth)
+    solved_share = report.solved_share
+    findings.append(
+        AuditFinding(
+            check="one lookup does not already answer it",
+            verdict="caveat" if solved_share > SOLVED_SHARE_CEILING else "pass",
+            detail=(
+                f"{report.solved_by_baseline}/{report.questions} questions are answered by one "
+                f"{STRATA_BASELINE} lookup at depth 1, so a pooled comparison is mostly a "
+                "statement about the benchmark"
+                if solved_share > SOLVED_SHARE_CEILING
+                else f"{solved_share:.1%} of questions are answered by one lookup"
+            ),
+            value=solved_share,
+        )
+    )
+
+    ratio = reach.truth_blocks / max(depth, 1)
+    findings.append(
+        AuditFinding(
+            check="enough competitors for a fixed depth to run out",
+            verdict="caveat" if ratio < CORPUS_TO_DEPTH_RATIO else "pass",
+            detail=(
+                f"{reach.truth_blocks} evidence-bearing dialogues for a retrieval depth of {depth} "
+                f"({ratio:.1f} per slot): too few for the front end to fail, so its miss rate is "
+                "zero and nothing can be decomposed"
+                if ratio < CORPUS_TO_DEPTH_RATIO
+                else (
+                    f"{reach.truth_blocks} evidence-bearing dialogues, "
+                    f"{ratio:.0f} per retrieved slot"
+                )
+            ),
+            value=ratio,
+        )
+    )
+
+    solved = baseline_solved_mask(questions, retrievers, baseline=STRATA_BASELINE)
+    hard = tuple(
+        question for question, is_solved in zip(questions, solved, strict=True) if not is_solved
+    )
+    orderings: dict[str, float] = {}
+    headroom: float | None = None
+    if hard:
+        hits = ordering_hits(hard, router, depth=depth)
+        ordering_report_ = ordering_report(hits, depth=depth)
+        orderings = {o.field: o.recall_at_depth for o in ordering_report_.orderings}
+        best = max(orderings.values()) if orderings else 0.0
+        headroom = ordering_report_.oracle_at_depth - best
+        findings.append(
+            AuditFinding(
+                check="the ordering stage is not the whole gap",
+                verdict="caveat" if headroom > RANKING_HEADROOM_CEILING else "pass",
+                detail=(
+                    f"the best available ordering reaches {best:.3f} against the candidate "
+                    f"list's own ceiling of {ordering_report_.oracle_at_depth:.3f}, "
+                    f"leaving {headroom:.3f} that no reordering of these candidates claims"
+                ),
+                value=headroom,
+            )
+        )
+        for comparison in paired_ordering_comparison(hits):
+            established = is_established(comparison)
+            findings.append(
+                AuditFinding(
+                    check=f"difference is resolvable: {comparison.left} - {comparison.right}",
+                    verdict="pass" if established else "caveat",
+                    detail=(
+                        f"{comparison.difference:+.3f}, {comparison.left_wins} won against "
+                        f"{comparison.right_wins} lost, p={comparison.exact_mcnemar_p:.3f}, 95% "
+                        f"[{comparison.bootstrap_low:+.3f}, {comparison.bootstrap_high:+.3f}]"
+                        + ("" if established else " -- a direction, not a result")
+                    ),
+                    value=comparison.difference,
+                )
+            )
+    else:
+        findings.append(
+            AuditFinding(
+                check="the ordering stage is not the whole gap",
+                verdict="caveat",
+                detail="no question discriminates, so the ordering stage could not be measured",
+                value=None,
+            )
+        )
+
+    return BenchmarkAudit(
+        package=str(package_root),
+        arrangement=arrangement,
+        window=window,
+        depth=depth,
+        questions=len(questions),
+        truth_blocks=reach.truth_blocks,
+        units=len(windows),
+        discriminating=len(hard),
+        findings=tuple(findings),
+    )
+
+
 #: The head-to-head comparisons every ordering report should carry, named here rather than chosen
 #: per report so a report cannot pick a flattering pair: the fusion against the strongest single
 #: channel, and the calibrated order against each of them.
