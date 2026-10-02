@@ -61,16 +61,31 @@ truncation is what does.
 
 ## The second thing this measurement says
 
+> **Withdrawn 2026-10-02, later the same day.** The conclusion below was drawn from an **any-gold**
+> metric -- one gold session retrieved is a hit -- and LongMemEval_S averages **1.90 gold sessions
+> per question**, 2.59 for `multi-session`. Under **all-gold@5**, which is what a question needing
+> three sessions actually asks for, **42.9% of `multi-session` and 28.6% of `temporal-reasoning`
+> questions have a required session outside the top five**, and 22.6% of the benchmark does. The
+> numbers below are unchanged and reproduce exactly; what is withdrawn is the conclusion drawn from
+> them. See `docs/discriminating-mass-2026-10-02.md`.
+>
+> The measurement error is exactly the one the grade note at the end of this document already
+> flagged -- "a question with 1.90 gold sessions is scored the same as one with a single gold
+> session" -- and the consequence was not followed through.
+
 **Retrieval is very nearly solved on LongMemEval_S too.** A plain BM25 over sessions puts a gold
 session in the top five for **95% to 100%** of questions, at every corpus size tested.
 
 The published best result on that benchmark -- Engram, at 83.6% answer accuracy against 73.2% for
 full context -- is an *end-to-end* number. So on a benchmark this project did not build, with its own
 retrieval protocol and its own readers, the evidence is in the retrieved context for almost every
-question and the reported accuracy is fourteen points below that. **The loss is downstream of
-retrieval there as well.** That is the same shape as this project's own finding, arrived at
+question and the reported accuracy is fourteen points below that. ~~**The loss is downstream of
+retrieval there as well.**~~ That is the same shape as this project's own finding, arrived at
 independently, and it is the single most useful thing in this document: the "does routing find the
 evidence" question is close to the wrong question on more than one benchmark.
+
+*The struck sentence is withdrawn, for the reason in the block above. The remainder of the section
+stands as a description of what an any-gold measurement shows.*
 
 ## Where the effect lives, stated as a domain
 

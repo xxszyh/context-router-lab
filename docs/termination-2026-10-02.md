@@ -38,6 +38,12 @@ of its API budget getting to a coin flip, and then established why:
   to the deterministic metric in both runs**, 2 for 2.
 - On the external benchmark the discriminating part is **16% of the questions** (164 of 1,000); the
   other 84% are answered by a single lexical lookup, where every arm scores at or above 0.990.
+  Measured across all ten available packages this saturates: **20.1% at 3,000 questions**, with the
+  filler axis flat to within a point over a fivefold increase and the dialogue axis rising less than
+  four points per tripling. No package reaches the 25% the repo's own `SOLVED_SHARE_CEILING`
+  requires, and the discriminating fifth is largely a re-labelling of query-to-evidence string
+  overlap (`recall@1` by overlap bucket: 0.463, 0.828, 0.976, 1.000, with 94% of questions below 0.4).
+  See `docs/discriminating-mass-2026-10-02.md`.
 
 ### The router as a method: it does not beat plain lexical retrieval
 
@@ -100,8 +106,12 @@ And three findings that stand on their own:
   large relative to the retrieval depth.
 - **Retrieval is very nearly solved on more than one benchmark.** A plain BM25 over sessions puts a
   gold session in the top five for 95-100% of LongMemEval_S questions, while the published best
-  end-to-end result on that benchmark is 83.6% accuracy. The loss is downstream of retrieval there
-  as well -- the same shape as this project's own finding, arrived at independently.
+  end-to-end result on that benchmark is 83.6% accuracy.
+  **Amended 2026-10-02: the 95-100% is an any-gold metric and the inference from it does not hold.**
+  LongMemEval_S averages 1.90 gold sessions per question; under all-gold@5, which is what a
+  multi-session question asks for, **42.9% of `multi-session` and 28.6% of `temporal-reasoning`
+  questions have a required session outside the top five**, and 22.6% of the benchmark does. On that
+  benchmark retrieval is the stage that fails. See `docs/discriminating-mass-2026-10-02.md`.
 - **The router's features are structurally unable to rank.** Every one of its nine inputs is
   set-normalized, so none can express "this candidate contains the query's rare identifier". Its
   largest single weight sits on `entity`, a feature that is identically zero under the adapter's own
@@ -137,6 +147,14 @@ If you arrived here to continue the research, the two concrete open items are:
 2. **A benchmark whose discriminating part is larger than 16% and whose evidence can be reached by
    paraphrase rather than verbatim.** Every measurement in this repository is conditioned on
    verbatim containment, which flatters lexical retrieval by construction.
+   **Amended 2026-10-02: both conditions are now met by one dataset, and it is not SCALE-QA.**
+   SCALE-QA saturates at 20.1% discriminating and its recall is monotone in string overlap
+   (0.463 at overlap below 0.2 up to 1.000 above 0.6). LongMemEval_S restricted to `multi-session`
+   plus `temporal-reasoning` plus `single-session-preference` gives 296 questions of which **35.8%
+   fail all-gold@5**, and its evidence label is a session-id set rather than a string, so any passage
+   in the session counts. That is the substrate the next measurement should use --
+   `docs/discriminating-mass-2026-10-02.md` has the numbers and `.scratch/longmemeval_strata.py` the
+   run.
 
 ## The honest bottom line
 
@@ -158,5 +176,7 @@ document that owns it: `docs/recency-budget-2026-10-01.md`, `docs/discriminating
 `docs/fusion-weights-2026-10-02.md`, `docs/composition-sweep-2026-10-02.md`,
 `docs/candidate-budget-2026-10-02.md`, `docs/ranker-ceiling-2026-10-02.md`,
 `docs/pair-features-2026-10-02.md`, `docs/longmemeval-density-2026-10-02.md`,
-`docs/session-report-2026-10-02.md`. The 93 commits is the handover's 83 plus the 11 added on
-2026-10-02.*
+`docs/discriminating-mass-2026-10-02.md`, `docs/session-report-2026-10-02.md`. The 93 commits is the
+handover's 83 plus the 11 added on 2026-10-02. Three statements carry a dated amendment made after
+first publication -- the discriminating share, the LongMemEval retrieval claim, and open item 2 --
+and in each case the original text is left visible with the correction beside it.*
