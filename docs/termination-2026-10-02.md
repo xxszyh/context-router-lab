@@ -210,8 +210,11 @@ itself a commit, so a count quoted against the tip is wrong the moment it is pub
 (`gh api repos/xxszyh/context-router-lab/commits?sha=main&per_page=1`, `Link` rel="last").
 
 One branch is deliberately left unmerged, and a reader should know it exists.
-**`channel-weighted-fusion` is one commit ahead of main and eleven behind**, carrying the plumbing
-that makes the fusion weights measurable plus `held_out_fusion` and its test
+**`channel-weighted-fusion` carries one commit that main does not.** At `e6c89fdc` it was one ahead
+and eleven behind; the branch has not moved since, so the ahead count is fixed while the behind
+count grows with every commit added to main -- which is the same trap as the commit count above, and
+the reason both are stated against a commit rather than against the tip. The commit carries the
+plumbing that makes the fusion weights measurable plus `held_out_fusion` and its test
 (`scale_qa.py` +169, `router.py` +21, `tests/test_router.py` +42, `tests/test_scale_qa.py` +39). Its
 conclusion is in the explanations table above -- *repairing the fusion improves anything end to end*:
 **refuted** -- and that is why it was never merged. Note the split it creates:
