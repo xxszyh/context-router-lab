@@ -118,9 +118,10 @@ python build_eval_dataset.py --context-budget 512k --num-questions 3000 --output
 
 ## What was deliberately not published
 
-Four files carrying a concurrent writer's in-flight edits were left untouched
-(`docs/annotation-protocol.md`, `docs/state-of-play.md`,
-`src/context_router/evaluation/metrics.py`, `docs/enlargement-sea-ice-2026-09-22.md`), and the
+Four files carrying a concurrent writer's in-flight edits were left untouched: three that exist in
+this repository (`docs/annotation-protocol.md`, `docs/state-of-play.md`,
+`src/context_router/evaluation/metrics.py`) and one that exists only in the working tree and is not
+published at all, a 448-line document on cloud-segmentation labelling dated 2026-09-22. The
 measurement was rebuilt from `main` plus an explicit file list rather than from the working tree,
 which carries both lines at once. Nothing from `artefacts/` or `annotation/` was touched or
 uploaded: those hold unscrubbed real conversations. Two files that *are* published,
