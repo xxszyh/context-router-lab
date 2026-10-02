@@ -208,7 +208,17 @@ commit this note was written on -- the handover's 83 plus 14 added on 2026-10-02
 pinned to that commit and not to the branch tip, because the amendment that states a commit count is
 itself a commit, so a count quoted against the tip is wrong the moment it is published
 (`gh api repos/xxszyh/context-router-lab/commits?sha=main&per_page=1`, `Link` rel="last").
-Five passages carry a dated amendment made after
+
+One branch is deliberately left unmerged, and a reader should know it exists.
+**`channel-weighted-fusion` is one commit ahead of main and eleven behind**, carrying the plumbing
+that makes the fusion weights measurable plus `held_out_fusion` and its test
+(`scale_qa.py` +169, `router.py` +21, `tests/test_router.py` +42, `tests/test_scale_qa.py` +39). Its
+conclusion is in the explanations table above -- *repairing the fusion improves anything end to end*:
+**refuted** -- and that is why it was never merged. Note the split it creates:
+**`docs/fusion-weights-2026-10-02.md` is on main, and the code that produced it is on the branch.**
+The two commits that carry the fusion-weight experiment were measured with the branch's `router.py`
+and `scale_qa.py`, so reproducing that document means checking the branch out
+(`gh api repos/xxszyh/context-router-lab/compare/main...channel-weighted-fusion`). Five passages carry a dated amendment made after
 first publication -- the discriminating share, the LongMemEval retrieval claim, the claim that the
 router does not beat plain lexical retrieval, open item 2, and this note -- and in each case the
 original text is left visible with the correction beside it. The last two amendments were made the
