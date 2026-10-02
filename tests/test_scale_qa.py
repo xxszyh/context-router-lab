@@ -776,3 +776,42 @@ def test_a_comparison_needs_both_orderings_measured() -> None:
     hits = ordering_hits(questions, router, depth=2, fields=("rrf_score",))
     with pytest.raises(ValueError, match="measured"):
         paired_ordering_comparison(hits, (("rrf_score", "lexical_rank"),))
+
+
+def test_held_out_fusion_reports_only_on_folds_it_did_not_fit() -> None:
+    """A parameter fitted on the fold it is reported on has not been tested, only memorised."""
+
+    from context_router.external.scale_qa import held_out_fusion
+
+    analyzer = LexicalAnalyzer()
+    windows = [
+        ScaleQaWindow(f"w{index}", text, index, len(text.split()))
+        for index, text in enumerate(_STRATUM_WINDOWS)
+    ]
+    questions = (
+        _question("a", "otters lichen", "secondary material concerning otters"),
+        _question("b", "falcon decoy", "a registry entry about the northern goshawk"),
+        _question("c", "tidal barrages", "a discussion of tidal barrages"),
+        _question("d", "volcanic ash", "an appendix about volcanic ash"),
+        _question("e", "lichen growth", "notes on lichen growth rates"),
+        _question("f", "decoy window", "the falcon decoy appears in this unrelated window"),
+    )
+    result = held_out_fusion(
+        questions, windows, analyzer=analyzer, embedder=_embedder(analyzer), depth=2, seed=7
+    )
+
+    assert result.train + result.calibration + result.holdout == len(questions)
+    assert set(result.channel_recall) == {"lexical", "dense", "entity"}
+    assert set(result.gated_weights) == {"lexical", "dense", "entity"}
+    # Gating keeps a channel only if its own recall is within tolerance of the best one.
+    best = max(result.channel_recall.values())
+    for name, recall in result.channel_recall.items():
+        assert result.gated_weights[name] == float(recall >= best - result.tolerance)
+
+    labels = {ordering.field for ordering in result.orderings}
+    assert "lexical_rank (best member)" in labels
+    assert "rrf_score (equal weight)" in labels
+    assert "gated fusion + hand-set ranker" in labels
+    for ordering in result.orderings:
+        assert 0.0 <= ordering.recall_at_depth <= 1.0
+        assert ordering.questions == result.holdout_hard

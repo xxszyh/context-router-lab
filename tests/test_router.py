@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 from context_router.domain import FlatContext, RawEvent, RouteRequest
 from context_router.routing import ContextRouter, route
+from context_router.routing.router import RoutingPolicy
 
 
 def event(event_id: str, sequence: int, content: str) -> RawEvent:
@@ -193,3 +194,44 @@ def test_route_never_returns_more_than_requested_contexts() -> None:
     decision = route(route_request)
 
     assert len(decision.selected_context_ids) <= 2
+
+
+# --- the fusion weights: making "a fusion that cannot beat its best member" expressible ---
+
+
+def test_naming_every_channel_at_weight_one_is_the_default_fusion_exactly() -> None:
+    """The knob was added to a pipeline whose numbers are published, so the default cannot move."""
+
+    route_request = request("SQLite migration 失败，SQLITE_BUSY 错误码怎么处理？")
+    default = ContextRouter().route(route_request)
+    explicit = ContextRouter(
+        policy=RoutingPolicy(rrf_weights={"dense": 1.0, "lexical": 1.0, "entity": 1.0})
+    ).route(route_request)
+
+    assert [c.rrf_score for c in explicit.candidates] == [c.rrf_score for c in default.candidates]
+    assert explicit.selected_context_ids == default.selected_context_ids
+    assert explicit.decision == default.decision
+
+
+def test_dropping_a_channel_changes_the_fusion_score() -> None:
+    """Leaving a channel out is how a caller says it does not deserve equal weight."""
+
+    route_request = request("SQLite migration 失败，SQLITE_BUSY 错误码怎么处理？")
+    default = ContextRouter().route(route_request)
+    lexical_only = ContextRouter(policy=RoutingPolicy(rrf_weights={"lexical": 1.0})).route(
+        route_request
+    )
+
+    default_scores = {c.context_id: c.rrf_score for c in default.candidates}
+    gated_scores = {c.context_id: c.rrf_score for c in lexical_only.candidates}
+    assert gated_scores != default_scores
+    # A name that is not one of the three channels contributes nothing rather than raising, so a
+    # caller can carry a channel it has switched off.
+    assert lexical_only.candidates
+
+
+def test_gating_every_channel_away_still_returns_a_decision() -> None:
+    route_request = request("Router、SQLite 和 plot.py 三者如何组合？")
+    decision = ContextRouter(policy=RoutingPolicy(rrf_weights={})).route(route_request)
+    assert decision.selected_context_ids
+    assert all(candidate.rrf_score == 0.0 for candidate in decision.candidates)

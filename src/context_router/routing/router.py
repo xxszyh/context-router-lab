@@ -29,6 +29,16 @@ class RoutingPolicy:
     top_per_retriever: int = 10
     max_candidates: int = 20
     rrf_k: int = 60
+    #: Per-channel weights for the reciprocal-rank fusion, keyed by ``dense``, ``lexical`` and
+    #: ``entity``. ``None`` means equal weight, which is the fusion every published number was
+    #: produced under; a channel left out of the mapping contributes nothing.
+    #:
+    #: It exists because equal weight is a hand-set constant rather than a measurement, and a
+    #: combination can end up below its own strongest member. On SCALE-QA's hard subset the lexical
+    #: channel recalls 0.640 on its own while the equal-weight fusion orders those same candidates
+    #: to 0.567 -- which is the check this knob makes expressible: *a fusion that cannot beat its
+    #: best channel should not be fusing.*
+    rrf_weights: dict[str, float] | None = None
     t_low: float = 0.35
     t_high: float = 0.72
     margin: float = 0.16
@@ -148,10 +158,19 @@ class ContextRouter:
             candidate_ids.add(request.primary_context_id)
         candidate_ids.update(key for key in request.recent_context_ids if key in contexts)
 
+        # Equal weight when the policy names none, and then this is `1.0 / (k + rank)` summed in
+        # the same order as before -- the default is unchanged to the bit, which is what makes the
+        # knob safe to add to a pipeline whose numbers are already published.
+        weights = self.policy.rrf_weights
         rrf_scores = {
             context_id: sum(
-                1.0 / (self.policy.rrf_k + ranks[context_id])
-                for ranks in (dense_ranks, lexical_ranks, entity_ranks)
+                (1.0 if weights is None else weights.get(name, 0.0))
+                / (self.policy.rrf_k + ranks[context_id])
+                for name, ranks in (
+                    ("dense", dense_ranks),
+                    ("lexical", lexical_ranks),
+                    ("entity", entity_ranks),
+                )
                 if context_id in ranks
             )
             for context_id in candidate_ids

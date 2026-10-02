@@ -48,6 +48,8 @@ from context_router.domain import ContextCandidate, FlatContext, RouteDecision
 from context_router.providers.embedding import EmbeddingProvider, HashEmbeddingProvider, cosine
 from context_router.retrieval import BM25Index, LexicalAnalyzer
 from context_router.routing import ContextRouter
+from context_router.routing.calibration import CandidateRanker, PlattContextRanker
+from context_router.routing.router import RoutingPolicy
 
 #: How the evaluator orders the truth and noise blocks before anyone reads them.
 #:
@@ -969,6 +971,164 @@ def candidate_order_attribution(
     )
 
 
+@dataclass(frozen=True)
+class FusionHoldout:
+    """A held-out answer to: is a measured channel combination worth trusting?
+
+    The rule this evaluates is stated before the numbers are seen: **a fusion that cannot beat its
+    own strongest member should not be fusing.** On SCALE-QA's hard subset the equal-weight fusion
+    orders the same candidates to 0.567 where the lexical channel alone reaches 0.640, and the
+    hand-set ranker to 0.628 -- both below the best member.
+
+    Two ways of fixing that are compared on questions neither of them was fitted on: gating the
+    fusion by each channel's *measured* recall (a weight, not a learned model), and replacing the
+    hand-set ranker with the one this project already knows how to fit.
+
+    ``channel_recall`` is measured on the training fold only. ``orderings`` are all measured on the
+    held-out fold, so a row that wins there won something that was not tuned into it.
+    """
+
+    seed: int
+    train: int
+    calibration: int
+    holdout: int
+    holdout_hard: int
+    tolerance: float
+    channel_recall: dict[str, float]
+    gated_weights: dict[str, float]
+    fitted_model_version: str | None
+    orderings: tuple[OrderingAttribution, ...]
+
+
+def held_out_fusion(
+    questions: tuple[ScaleQaQuestion, ...],
+    windows: list[ScaleQaWindow],
+    *,
+    analyzer: LexicalAnalyzer,
+    embedder: EmbeddingProvider,
+    depth: int = RETRIEVAL_DEPTH,
+    seed: int = 20260420,
+    train_fraction: float = 0.4,
+    calibration_fraction: float = 0.2,
+    tolerance: float = 0.05,
+) -> FusionHoldout:
+    """Fit every lever on one fold, then measure the comparison on another.
+
+    `tolerance` is registered in advance rather than tuned: a channel is kept only if its own
+    recall on the training fold is within 0.05 of the best channel's. It is the only free number in
+    the gating rule, and the holdout fold is never consulted to set it.
+    """
+
+    order = list(range(len(questions)))
+    random.Random(seed).shuffle(order)
+    n_train = int(len(order) * train_fraction)
+    n_calibration = int(len(order) * calibration_fraction)
+    train = tuple(questions[i] for i in order[:n_train])
+    calibration = tuple(questions[i] for i in order[n_train : n_train + n_calibration])
+    holdout = tuple(questions[i] for i in order[n_train + n_calibration :])
+
+    normalized = {window.window_id: _normalize(window.text) for window in windows}
+
+    def gold_of(question: ScaleQaQuestion) -> set[str]:
+        evidence = [_normalize(item) for item in question.expected_doc]
+        return {key for key, text in normalized.items() if all(item in text for item in evidence)}
+
+    base = WindowRetriever(windows, mode="router", analyzer=analyzer, embedder=embedder)
+    train_channels = candidate_order_attribution(
+        train, base, depth=depth, fields=RANK_ORDERING_FIELDS
+    )
+    channel_recall = {
+        ordering.field.removesuffix("_rank"): ordering.recall_at_depth
+        for ordering in train_channels.orderings
+    }
+    best = max(channel_recall.values(), default=0.0)
+    gated = {
+        name: (1.0 if recall >= best - tolerance else 0.0)
+        for name, recall in channel_recall.items()
+    }
+
+    lexical_arm = WindowRetriever(windows, mode="lexical", analyzer=analyzer, embedder=embedder)
+    solved = baseline_solved_mask(holdout, {STRATA_BASELINE: lexical_arm})
+    hard_holdout = tuple(
+        question for question, is_solved in zip(holdout, solved, strict=True) if not is_solved
+    )
+
+    rows: dict[str, list[dict[str, float]]] = {"train": [], "calibration": []}
+    labels: dict[str, list[int]] = {"train": [], "calibration": []}
+    for name, fold in (("train", train), ("calibration", calibration)):
+        for question in fold:
+            _, decision = base.retrieve_with_decision(question.query, depth=1)
+            if decision is None:
+                continue
+            gold = gold_of(question)
+            for candidate in decision.candidates:
+                rows[name].append(candidate.feature_values)
+                labels[name].append(int(candidate.context_id in gold))
+
+    fitted_version: str | None = None
+    fitted_ranker: PlattContextRanker | None = None
+    if set(labels["train"]) == {0, 1} and set(labels["calibration"]) == {0, 1}:
+        fitted_ranker = PlattContextRanker.fit(
+            train_rows=rows["train"],
+            train_labels=labels["train"],
+            calibration_rows=rows["calibration"],
+            calibration_labels=labels["calibration"],
+        )
+        fitted_version = fitted_ranker.model_version
+
+    gated_arm = WindowRetriever(
+        windows,
+        mode="router",
+        analyzer=analyzer,
+        embedder=embedder,
+        policy=RoutingPolicy(rrf_weights=dict(gated)),
+    )
+    fitted_arm = (
+        WindowRetriever(
+            windows, mode="router", analyzer=analyzer, embedder=embedder, ranker=fitted_ranker
+        )
+        if fitted_ranker is not None
+        else None
+    )
+
+    measured: list[OrderingAttribution] = []
+    for label, retriever, fields in (
+        ("lexical_rank (best member)", base, ("lexical_rank",)),
+        ("rrf_score (equal weight)", base, ("rrf_score",)),
+        ("hand-set ranker (current default)", base, ("calibrated_probability",)),
+        ("gated fusion + hand-set ranker", gated_arm, ("calibrated_probability",)),
+        (
+            "fitted ranker",
+            fitted_arm,
+            ("calibrated_probability",),
+        ),
+    ):
+        if retriever is None:
+            continue
+        report = candidate_order_attribution(hard_holdout, retriever, depth=depth, fields=fields)
+        for ordering in report.orderings:
+            measured.append(
+                OrderingAttribution(
+                    field=label,
+                    questions=ordering.questions,
+                    recall_at_depth=ordering.recall_at_depth,
+                )
+            )
+
+    return FusionHoldout(
+        seed=seed,
+        train=len(train),
+        calibration=len(calibration),
+        holdout=len(holdout),
+        holdout_hard=len(hard_holdout),
+        tolerance=tolerance,
+        channel_recall=channel_recall,
+        gated_weights=gated,
+        fitted_model_version=fitted_version,
+        orderings=tuple(measured),
+    )
+
+
 def default_embedder(analyzer: LexicalAnalyzer) -> HashEmbeddingProvider:
     """The project's placeholder, named here so a caller cannot mistake it for a real one."""
 
@@ -1026,12 +1186,16 @@ class WindowRetriever:
         analyzer: LexicalAnalyzer,
         embedder: EmbeddingProvider,
         derived_fields: bool = False,
+        policy: RoutingPolicy | None = None,
+        ranker: CandidateRanker | None = None,
     ) -> None:
         self.windows = windows
         self.mode = mode
         self.analyzer = analyzer
         self.embedder = embedder
         self.derived_fields = derived_fields
+        self.policy = policy
+        self.ranker = ranker
         self.by_id = {window.window_id: window for window in windows}
         self.documents = {window.window_id: window.text for window in windows}
         self.index = BM25Index(self.documents, analyzer=analyzer)
@@ -1049,6 +1213,11 @@ class WindowRetriever:
             self._router = ContextRouter(
                 analyzer=self.analyzer,
                 embedding_provider=self.embedder,
+                # `policy` and `ranker` are how a caller asks what a *different* fusion or a
+                # *fitted* ranker would have done over the identical unit set. Both default to the
+                # router's own defaults, so the arm is unchanged for a caller that passes neither.
+                policy=self.policy,
+                ranker=self.ranker,
                 # The catalog is fixed for this retriever's lifetime, so one prepared entry is
                 # all the cache ever needs. Without it the router rebuilds a 2,810-document BM25
                 # index and re-embeds every window on every query.
