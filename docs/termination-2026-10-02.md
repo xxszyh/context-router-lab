@@ -202,8 +202,10 @@ document that owns it: `docs/recency-budget-2026-10-01.md`, `docs/discriminating
 `docs/candidate-budget-2026-10-02.md`, `docs/ranker-ceiling-2026-10-02.md`,
 `docs/pair-features-2026-10-02.md`, `docs/longmemeval-density-2026-10-02.md`,
 `docs/discriminating-mass-2026-10-02.md`, `docs/longmemeval-decomposition-2026-10-02.md`,
-`docs/session-report-2026-10-02.md`. The 93 commits is the
-handover's 83 plus the 11 added on 2026-10-02. Five passages carry a dated amendment made after
+`docs/session-report-2026-10-02.md`. The commit count originally given here was 93; measured on the
+final commit rather than carried forward, **main carries 97**, the handover's 83 plus 14 added on
+2026-10-02 (`gh api repos/xxszyh/context-router-lab/commits?sha=main&per_page=1`, `Link` rel="last").
+Five passages carry a dated amendment made after
 first publication -- the discriminating share, the LongMemEval retrieval claim, the claim that the
 router does not beat plain lexical retrieval, open item 2, and this note -- and in each case the
 original text is left visible with the correction beside it. The last two amendments were made the

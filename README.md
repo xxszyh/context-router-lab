@@ -15,10 +15,24 @@ measure whether **selective context assembly** is worth building at all, and onl
 build it.
 
 > **The project is closed as a router and kept as a record.** The token half is established and
-> stronger than the claim; the quality half is a null result, and the benchmarks could not have
-> shown otherwise. Read **[`docs/termination-2026-10-02.md`](docs/termination-2026-10-02.md)**
-> first: it states what was established, every explanation that was proposed and refuted, and the
-> two open items. To find out whether *your* benchmark can answer the question you are asking it:
+> stronger than the claim; the quality half is a null result that the available judge could not have
+> resolved. Read **[`docs/termination-2026-10-02.md`](docs/termination-2026-10-02.md)** first: it
+> states what was established, every explanation that was proposed and refuted, the four findings
+> that outlive the question, and what a future reader should do instead.
+>
+> Two measurements made after that statement was written, and folded back into it, are what a reader
+> should take next.
+> **[`docs/discriminating-mass-2026-10-02.md`](docs/discriminating-mass-2026-10-02.md)** withdraws the
+> claim that retrieval is nearly solved -- that came from an any-gold reading of a benchmark whose
+> multi-session questions need a *set* of sessions -- and shows SCALE-QA saturating at 20%
+> discriminating, with recall monotone in string overlap.
+> **[`docs/longmemeval-decomposition-2026-10-02.md`](docs/longmemeval-decomposition-2026-10-02.md)**
+> then uses the substrate that does discriminate and finds the front end nearly free (0.068 of the
+> ceiling) and the ordering stage leaving 0.247. The router **does** beat plain BM25 there by an
+> established margin, but the gain belongs to the fusion and the shipped configuration does not beat
+> it.
+>
+> To find out whether *your* benchmark can answer the question you are asking it:
 > `ctxlab audit <package>` ([`docs/audit-2026-10-02.md`](docs/audit-2026-10-02.md)).
 
 ---
@@ -518,6 +532,22 @@ gate 上它**只跑通 5 个**，其余 19 个 HTTP 400（**79%**）。
 **三、合成数据上，门槛一通过、门槛二没过。** Oracle 路由省 **85.2%** 的 memory token 且
 标注证据召回一条不丢，说明架构有余量；但校准（门二）的 required-context 召回
 **0.840 < 0.95**。
+
+**四、终止陈述发布后，又被项目自己的测量修正了两次——两次都记在原文旁边。**
+
+- **"检索几乎已解决"这个结论站不住。** 它来自 **any-gold** 读法（"至少一个金标会话进了
+  top-5"），而 LongMemEval_S 平均每题需要 **1.90** 个金标会话，`multi-session` 是 **2.59** 个。
+  换成 **all-gold@5**（每个必需会话都要在前五）：**42.9% 的 `multi-session` 题**有必需会话不在
+  前五，整体 22.6%。这是这个项目**第一次有了能真正区分"损失在检索还是在下游"的基底**。
+- **在那个基底上：前端几乎免费，排序不是。** 把整个语料交给路由器当候选（于是 candidate miss
+  构造上为 0），ceiling 只从 **0.922 升到 0.990**——前端值 0.068；而排序层只拿到 0.922 里的
+  **0.676，丢掉 0.247**。路由器在那里**确实**以 established 的幅度赢过纯 BM25（**+0.078**，
+  31 胜 8 负，p<0.001；单看 `multi-session` 是 **+0.135**），**但增益属于等权 RRF 融合**——
+  `router:everything − hybrid_full` 是 +0.034、**p = 0.052**，区间排除 0 而精确检验没有，
+  按项目自己的规则只能算方向；**出厂配置仍然打不过融合**（−0.017，15 胜 20 负）。
+- 顺带修正：SCALE-QA 的判别质量**封顶在 20.1%**（十个包全扫过，填充轴完全平坦、对话数轴饱和），
+  没有任何包越过项目自己声明的 25% 门槛；而 **融合效应的符号随标签反转**——在 SCALE-QA 的逐字
+  字符串上是 **−0.085**，在会话 ID 上是 **+0.051**。
 
 ### 方法上值得单独说的一件事
 
