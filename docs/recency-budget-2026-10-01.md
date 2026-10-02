@@ -408,9 +408,10 @@ Two consequences, and the second is a change to how results on this benchmark sh
    the comparison is what makes the arms look close; reporting the split shows the arms differ by
    0.010 on the part that discriminates and by 0.010 on the part that does not.
 2. **The router's deficit is not where the design claims its advantage.** It loses 0.010 on the
-   solved 836 and 0.012 on the unsolved 164. A relation-aware, calibrated ranker was supposed to
-   earn its keep on the hard cases, and the decomposition below shows exactly where that fails to
-   happen.
+   solved 836 and 0.012 on the unsolved 164 -- and the second of those is smaller than that sample
+   can resolve (the paired test below puts it at 9 questions won against 11 lost), so only the first
+   is a measured difference. A relation-aware, calibrated ranker was supposed to earn its keep on
+   the hard cases, and the decomposition below shows where the distance actually is.
 
 The generalisable instrument is the split itself: **before quoting a pooled score on any retrieval
 benchmark, measure how much of it one cheap baseline already answers.** That is `recency_reachability`
@@ -444,10 +445,11 @@ Three readings, and the third is the one that moves the next step.
 1. **Candidate generation is not the bottleneck.** The router's own list holds the gold for **139 of
    the 164 (85%)**, at a median rank of 3 and a maximum of 16. Whatever the dense/lexical/entity RRF
    front end is doing, it is finding the evidence.
-2. **The ranker is.** At the depth the adapter retrieves to, the router's ordering (0.622) is very
-   slightly *worse* than plain BM25's (0.640), and the 0.226 between what it returns at depth 5 and
-   the 0.848 its own list already contains is lost entirely between "candidate" and "returned". The
-   subsection below says which stage of the pipeline that loss belongs to.
+2. **The ranker is where the remaining distance lives.** The router's ordering reaches 0.622 against
+   plain BM25's 0.640 -- a difference the paired test in the next subsection cannot resolve at this
+   sample size -- and the 0.226 between what it returns at depth 5 and the 0.848 its own list already
+   contains is lost entirely between "candidate" and "returned". That subsection says which stage of
+   the pipeline the distance belongs to, and how much of it is real.
 3. **The depth policy consults the ranking last.** The router selects the maximum of three contexts
    on **156 of 164** queries, and the returned set is those three followed by candidates up to depth
    5 -- so only two slots are left to the ranking. Of the 139 questions whose gold is in the list,
@@ -478,31 +480,55 @@ ranker". Ordering the **same** candidate list by each field in turn, on the 164 
 
 The candidate list has a median of 17 members, and plain BM25 over all 2,810 windows scores 0.640.
 
-Three things follow, and they are the mechanism the pooled number was hiding.
+**Those five numbers are one draw of 164 questions, and the differences among the top three are
+smaller than that sample can resolve.** The comparison is paired -- the same questions, the same
+candidate lists, only the ordering changes -- so it can be tested directly:
+
+| paired, same 164 questions | difference | win / lose | exact McNemar p | bootstrap 95% |
+|---|---:|---|---:|---|
+| `calibrated_probability` - `lexical_rank` | **-0.012** | 9 / 11 | **0.824** | [-0.067, +0.043] |
+| `rrf_score` - `lexical_rank` | **-0.073** | 13 / 25 | 0.073 | [-0.146, +0.000] |
+| `calibrated_probability` - `rrf_score` | **+0.061** | 16 / 6 | 0.052 | [+0.006, +0.116] |
+
+**None of the three clears p < 0.05**, and the first is nowhere near it: 9 questions won against 11
+lost. It was quoted to three decimals because the rest of the table is quoted to three decimals, not
+because 164 questions can resolve a thousandth. This project already applies that standard to the
+paid judge -- a tally at n = 44, *reported as a direction only* -- and had not applied it here.
+
+Three things follow, and the third is a correction to an earlier draft of this section.
 
 1. **The front end loses nothing.** The lexical channel, restricted to the router's own ~17
    candidates, recalls **0.640** -- the same as BM25 over all 2,810 windows, to three decimals. If
    the RRF front end were dropping lexical hits that equality could not hold. Candidate generation
    is not what costs the router.
-2. **The equal-weight fusion is what costs it.** Ordering the identical candidates by `rrf_score`
-   drops to **0.567**, 0.073 below the lexical channel alone. RRF admits a channel whose own recall
-   on this subset is 0.378 at the same weight as one whose recall is 0.640, and the sum comes out
-   worse than the better channel by itself.
-3. **Calibration recovers most of the damage, and not all of it.** `calibrated_probability` lifts
-   the order back to **0.628** -- 0.061 above the fusion -- and still lands 0.012 below simply using
-   the lexical channel over the same list.
+2. **The equal-weight fusion is the weakest ordering of the three.** Ordering the identical
+   candidates by `rrf_score` drops to **0.567**, 0.073 below the lexical channel alone and 25
+   questions lost to 13 won. RRF admits a channel whose own recall on this subset is 0.378 at the
+   same weight as one whose recall is 0.640, and the sum comes out worse than the better channel by
+   itself. This is the one comparison here whose bootstrap interval does not cross zero -- it stops
+   exactly at it -- and it is the only row worth acting on.
+3. **The combination is not demonstrably behind its own best channel.** `calibrated_probability`
+   sits 0.012 below `lexical_rank`, at 9 questions won against 11 lost -- a coin. An earlier draft of
+   this section read that as "calibration recovers the damage and not all of it", which is a finding
+   the sample does not contain. **It is withdrawn.** The router's deficit on this benchmark is
+   produced by its fusion step, and the calibration stage recovers it to the point where what is
+   left cannot be measured here.
 
-So the router's deficit on this benchmark is produced by its own fusion step and only partly
-repaired by its own calibration step. That is sharper than "the ranker is weak": it names the two
-stages a change would have to touch, and says which of them is upstream.
+The correction matters more than its size. What this table supports is that **equal-weight fusion of
+channels of unequal quality is a measurable defect** -- and `docs/fusion-weights-2026-10-02.md` on
+the `channel-weighted-fusion` branch shows that repairing it changes nothing end to end: gating the
+fusion on each channel's measured recall moves the router's own held-out score by zero. What the
+table does not support is that the router returns an order worse than its best single channel, and
+the earlier draft said that it did.
 
 *Grade: exact, deterministic, offline -- one router pass over the 164 questions with the pinned
-static encoder, no judge, no API. The attribution is **conditional on this benchmark's channel
-quality**: the dense channel is far weaker than lexical here (0.378 against 0.640 over the same
-subset), which is a property of a verbatim-evidence benchmark as much as of the encoder. "Equal
-weight RRF costs the ordering" is therefore established where that gap exists and is not claimed
-where it does not -- on a corpus where dense retrieval is the stronger channel the same fusion would
-not obviously cost anything.*
+static encoder, no judge, no API. The recalls are exact-evidence containment and are not estimates;
+**the differences between them are estimates, and the paired table above is their grade** -- a
+20,000-resample bootstrap over questions and an exact McNemar on the discordant pairs. The
+attribution is additionally **conditional on this benchmark's channel quality**: the dense channel is
+far weaker than lexical here (0.378 against 0.640 over the same subset), which is a property of a
+verbatim-evidence benchmark as much as of the encoder. "Equal-weight RRF costs the ordering" is
+therefore established where that gap exists and is not claimed where it does not.*
 
 Both halves are now first-class and reproducible from the CLI rather than from a one-off script.
 `WindowRetriever.retrieve_with_decision` keeps the `RouteDecision` that `retrieve` discards, and
@@ -548,14 +574,17 @@ Four things follow, and the last two are decisions rather than tasks.
    supported. "Routing finds the evidence better" is supported on one conversation and reversed on
    the other. "Routing improves answers" is not supported and the benchmark cannot currently test
    it.
-4. On the external benchmark the loss is now attributed rather than merely located. The front end
-   reaches the evidence for 85% of the questions that discriminate; the equal-weight fusion orders
-   those same candidates 0.073 *below* the lexical channel it is fusing; calibration buys back 0.061
-   of that and still ends 0.012 under the lexical channel alone. The next experiment that can move
-   this number is therefore in the fusion or in the calibration -- not another retriever, another
-   embedder or another window size, all three of which have now been measured and are not where the
-   loss is. Both diagnostics are permanent CLI output (`router_decomposition`, `router_ordering`),
-   so that experiment can be judged against the same two tables instead of against a pooled score.
+4. On the external benchmark the loss is now attributed rather than merely located, and bounded. The
+   front end reaches the evidence for 85% of the questions that discriminate; the equal-weight fusion
+   orders those same candidates 0.073 below the lexical channel it is fusing (13 won against 25
+   lost); calibration buys back 0.061 and lands within noise of that channel (9 won against 11 lost,
+   p = 0.82). The measurement is therefore complete enough to say **what the defect is**, and not
+   large enough to rank the methods that repair it: **164 discriminating questions cannot separate
+   these combinations**, so what can move this is more questions rather than a better fusion.
+   `docs/fusion-weights-2026-10-02.md` records a fusion repair that measures as zero benefit for
+   exactly that reason. Both diagnostics are permanent CLI output (`router_decomposition`,
+   `router_ordering`), so the larger sample can be judged against the same two tables instead of
+   against a pooled score.
 
 ```bash
 # reproduce every number above, offline, no API key
