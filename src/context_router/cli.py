@@ -1230,7 +1230,8 @@ def scale_qa_command(
     )
     typer.echo(
         f"arrangement={arrangement} seed={seed}  stream={reach.stream_tokens} tokens "
-        f"({reach.truth_tokens / max(reach.stream_tokens, 1):.1%} truth)  "
+        f"({reach.truth_tokens / max(reach.stream_tokens, 1):.1%} truth, "
+        f"{reach.truth_blocks} evidence dialogues)  "
         f"median distance from end={reach.median_distance_from_end:.0f}"
     )
     degenerate = all(share in (0.0, 1.0) for share in reach.reachable_within_window.values())

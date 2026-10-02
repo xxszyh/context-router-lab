@@ -139,6 +139,11 @@ class ArrangementReachability:
     seed: int
     stream_tokens: int
     truth_tokens: int
+    #: How many evidence-bearing dialogues the stream holds. This is the number a reader needs to
+    #: interpret a routing-miss decomposition, and the one nobody reports: swept from 1,000 to
+    #: 3,000 at a fixed truth share it doubles the candidate-miss rate, while sweeping the filler
+    #: from 27% to 98% of the stream moves that rate by nothing at all.
+    truth_blocks: int
     questions: int
     located: int
     median_distance_from_end: float
@@ -446,6 +451,7 @@ def arrangement_reachability(
     total = cursor
 
     truth_tokens = sum(counter.count(block.text) for block in blocks if block.kind == "truth")
+    truth_blocks = sum(1 for block in blocks if block.kind == "truth")
     distances: list[float] = []
     for question in questions:
         evidence = [_normalize(item) for item in question.expected_doc]
@@ -477,6 +483,7 @@ def arrangement_reachability(
         seed=seed,
         stream_tokens=total,
         truth_tokens=truth_tokens,
+        truth_blocks=truth_blocks,
         questions=len(questions),
         located=len(distances),
         median_distance_from_end=median,

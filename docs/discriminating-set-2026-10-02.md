@@ -103,6 +103,14 @@ is also a bottleneck.* Which one a reader should care about depends on which mix
 resembles -- and the 26.7%-truth package, having been built to fill a budget with noise, is not
 obviously the realistic one.
 
+**That reading is wrong, and it was corrected the same day.** The obvious suspect for the difference
+was the evidence-to-filler ratio, and `docs/composition-sweep-2026-10-02.md` sweeps it: from 27% to
+98% truth at a fixed question set the candidate-miss rate does not move (0.237 to 0.248), while from
+1,000 to 3,000 evidence dialogues at a fixed truth share it goes 0.131 to 0.246. **The corpus decides
+and the filler does not** -- a noise block is UltraChat and is easy to reject, while another
+SCALE-QA dialogue is a near-miss. "Candidate generation is not the bottleneck" is a statement about
+corpus size, and this document wrote it without one.
+
 ## The instrument, made first-class
 
 The reason the correction was needed is that the report could print a difference without the test

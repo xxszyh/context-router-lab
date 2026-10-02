@@ -162,6 +162,24 @@ def test_the_naive_arrangement_is_reported_as_degenerate(package: ScaleQaPackage
         assert share == 0.0, size
 
 
+def test_the_reachability_report_names_the_size_of_the_evidence_corpus(
+    package: ScaleQaPackage,
+) -> None:
+    """The number a reader needs to interpret a miss decomposition, and the one nobody reports.
+
+    Swept from 1,000 to 3,000 evidence dialogues at a fixed truth share, the router's
+    candidate-miss rate goes 0.131 -> 0.246. Swept from 27% to 98% truth at a fixed corpus it does
+    not move. "Candidate generation is not the bottleneck" is a statement about this number.
+    """
+
+    counter = TokenCounter()
+    ordered = arrange(package, arrangement="blocks", seed=0)
+    report = arrangement_reachability(
+        ordered, package.questions, counter=counter, arrangement="blocks", seed=0
+    )
+    assert report.truth_blocks == len(package.truth) == 2
+
+
 def test_windows_never_span_two_dialogues(package: ScaleQaPackage) -> None:
     """A window is a retrieved unit inside one source dialogue, not a slice of the concatenation."""
 
