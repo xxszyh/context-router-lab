@@ -92,8 +92,10 @@ answer quality remains unestablished.
 The offline [answer exchange](answer-exchange-2026-10-07.md) now implements the
 generation/independent-judging/reporting chain. It requires complete paired
 imports and common generator settings, hides reference labels from generation,
-and records character or declared local-tokenizer budgets. No paid calls have
-been made. A new held-out protocol and abstention experiment are still required.
+and records character or declared local-tokenizer budgets. The local batch runner
+previews by default, journals each attempt, and requires explicit execution against
+a loopback Chat Completions service. No live generation or paid calls have been made.
+A new held-out protocol and real answer/abstention experiment are still required.
 
 The full local plan contains 278 questions across hybrid/router/joint/query-only,
 1,112 generation requests, and a shared 12,000-character memory cap. Six questions
@@ -101,6 +103,25 @@ contain identical session copies with conflicting timestamps; all dates are
 preserved and marked ambiguous, without dropping questions. Reference integer
 answers in the cleaned release are supported. The plan remains local and its
 status is pending generation, not a new answer-quality result.
+
+Refusal questions can now be retrieved separately with --abstention-only or
+included with --include-abstention. Their retrieval metrics are null and never
+enter the answerable recall denominator. Answer plans keep refusal labels private;
+independent judging uses the missing-information policy, and quality reports give
+answerable and abstention strata separate summaries and paired comparisons. An
+empty or failed response never counts as a correct refusal.
+
+A lightweight hash-embedding smoke run prepared all 18 hard-type refusal cases
+from the local cleaned S file, then exported 54 requests for hybrid/router/query-only.
+It does not reproduce or extend the neural/joint retrieval result. All 1,112 existing
+answerable requests also pass the batch dry run, with zero network calls or output
+writes. Mock transports exercise generation, independent judging, scoring, interruption,
+partial-tail recovery, explicit failure retries and strict response validation.
+
+Local validation passes 332 tests, Ruff lint/format, strict mypy, and a package
+wheel build. Validation uses mock transports and offline fixtures; no desktop
+input or live generation is involved. The real-data refusal plan remains
+pending_generation, with one question containing ambiguous duplicate-session dates.
 
 Model source: [MS MARCO MiniLM cross-encoder](https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2).
 This is a passage ranker trained for MS MARCO, not a model validated for long

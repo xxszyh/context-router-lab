@@ -30,6 +30,9 @@ The [offline answer-quality exchange](docs/answer-exchange-2026-10-07.md) now
 exports dated, budgeted generation inputs, separate blinded judging requests,
 and complete-set paired accuracy reports. It makes no model calls and reports
 quality as unmeasured until real answers and independent judgments are imported.
+An opt-in local batch runner now previews by default, supports durable resume and
+explicit failure retries, and validates model identity and completion status.
+Abstention experiments keep their own denominators and never inflate retrieval recall.
 
 > **The project is closed as a router and kept as a record.** The token half is established and
 > stronger than the claim; the quality half is a null result that the available judge could not have

@@ -133,6 +133,8 @@ def longmemeval_command(
     seed: int = 20260420,
     resume: bool = False,
     embedding_revision: str = DEFAULT_STATIC_REVISION,
+    include_abstention: bool = False,
+    abstention_only: bool = False,
 ) -> None:
     """Measure required sessions, candidate loss, and paired ordering gains."""
     if dataset.resolve() == output.resolve():
@@ -160,6 +162,8 @@ def longmemeval_command(
             seed=seed,
             checkpoint=output.with_suffix(".checkpoint.jsonl"),
             resume=resume,
+            include_abstention=include_abstention,
+            abstention_only=abstention_only,
             progress=lambda count: typer.echo(f"  evaluated {count}") if count % 25 == 0 else None,
         )
     except ValueError as error:

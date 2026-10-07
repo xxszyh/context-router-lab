@@ -1,10 +1,12 @@
 """Commands for an offline LongMemEval answer-quality exchange."""
 
+import json
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
+from context_router.external.answer_runner import Stage, TokenLimitField, run_requests
 from context_router.external.longmemeval import write_report
 from context_router.external.longmemeval_answers import (
     SUPPORTED_ARMS,
@@ -16,6 +18,55 @@ from context_router.external.longmemeval_answers import (
 
 
 def register_answer_commands(app: typer.Typer) -> None:
+    @app.command("longmemeval-run")
+    def run_command(
+        requests: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+        output: Path,
+        model: Annotated[
+            str, typer.Option(help="Explicit model/version served by the local endpoint")
+        ],
+        stage: str = "generation",
+        base_url: str = "http://127.0.0.1:11434/v1",
+        execute: bool = False,
+        resume: bool = False,
+        retry_failures: bool = False,
+        max_requests: Annotated[int, typer.Option(min=1)] = 20,
+        max_output_tokens: Annotated[int, typer.Option(min=1)] = 256,
+        temperature: Annotated[float, typer.Option(min=0, max=2)] = 0.0,
+        token_limit_field: str = "max_completion_tokens",
+        timeout: Annotated[float, typer.Option(min=0.01, max=60)] = 60.0,
+    ) -> None:
+        """Preview or explicitly execute a bounded local batch; journal every attempt."""
+        if stage not in ("generation", "judge"):
+            raise typer.BadParameter("stage must be generation or judge")
+        if token_limit_field not in ("max_tokens", "max_completion_tokens"):
+            raise typer.BadParameter("unsupported token-limit-field")
+        selected_stage: Stage = "generation" if stage == "generation" else "judge"
+        selected_limit: TokenLimitField = (
+            "max_tokens" if token_limit_field == "max_tokens" else "max_completion_tokens"
+        )
+        try:
+            result = run_requests(
+                requests,
+                output,
+                stage=selected_stage,
+                model=model,
+                base_url=base_url,
+                execute=execute,
+                resume=resume,
+                retry_failures=retry_failures,
+                max_requests=max_requests,
+                max_output_tokens=max_output_tokens,
+                temperature=temperature,
+                token_limit_field=selected_limit,
+                timeout=timeout,
+            )
+        except ValueError as error:
+            raise typer.BadParameter(str(error)) from error
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+        if result.get("failed", 0):
+            raise typer.Exit(code=1)
+
     @app.command("longmemeval-answer-plan")
     def plan_command(
         dataset: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
@@ -27,6 +78,7 @@ def register_answer_commands(app: typer.Typer) -> None:
         arm: Annotated[list[str] | None, typer.Option()] = None,
         limit: Annotated[int | None, typer.Option(min=1)] = None,
         seed: int = 20261007,
+        include_abstention: bool = False,
     ) -> None:
         """Export dated, budgeted prompts. Makes no model calls."""
         try:
@@ -40,6 +92,7 @@ def register_answer_commands(app: typer.Typer) -> None:
                 arms=tuple(arm or SUPPORTED_ARMS),
                 limit=limit,
                 seed=seed,
+                include_abstention=include_abstention,
             )
         except (ValueError, ImportError) as error:
             raise typer.BadParameter(str(error)) from error
@@ -83,6 +136,4 @@ def register_answer_commands(app: typer.Typer) -> None:
         typer.echo(
             f"Scored {len(result['records'])} independently judged answers. Report: {output}"
         )
-        typer.echo(
-            "Scope: exploratory, answerable questions only; no held-out or abstention claim."
-        )
+        typer.echo("Scope: exploratory; answerable and abstention results are reported separately.")

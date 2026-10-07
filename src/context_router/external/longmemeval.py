@@ -175,12 +175,14 @@ def evaluate_instance(
     policy: RoutingPolicy | None = None,
     scorer: PairScorer | None = None,
     passages_per_session: int = 2,
+    allow_abstention: bool = False,
 ) -> dict[str, Any]:
     validate_instance(instance)
     if not 1 <= depth <= 20:
         raise ValueError("depth must be between 1 and 20")
     gold = set(instance["answer_session_ids"])
-    if not gold:
+    abstention = not gold or instance["question_id"].endswith("_abs")
+    if abstention and not allow_abstention:
         raise ValueError("abstention cases must be evaluated separately")
     query = instance["question"]
     ids = instance["haystack_session_ids"]
@@ -238,21 +240,29 @@ def evaluate_instance(
         )
         orderings["joint"] = joint
     arms = {
-        name: {"retrieved_ids": ordered[:depth], "metrics": evidence_metrics(gold, ordered[:depth])}
+        name: {
+            "retrieved_ids": ordered[:depth],
+            "metrics": None if abstention else evidence_metrics(gold, ordered[:depth]),
+        }
         for name, ordered in orderings.items()
     }
-    return {
+    record = {
         "question_id": instance["question_id"],
         "question_type": instance["question_type"],
         "gold_session_ids": sorted(gold),
         "haystack_sessions": len(ids),
         "duplicate_sessions_collapsed": duplicate_sessions,
         "candidate_ids": candidates,
-        "candidate_all_gold": gold <= set(candidates),
-        "oracle_all_at_depth": len(gold) <= depth and gold <= set(candidates),
+        "candidate_all_gold": None if abstention else gold <= set(candidates),
+        "oracle_all_at_depth": None
+        if abstention
+        else len(gold) <= depth and gold <= set(candidates),
         "rerank_scores": rerank_scores,
         "arms": arms,
     }
+    if abstention:
+        record["expects_refusal"] = True
+    return record
 
 
 def summarize_records(records: list[dict[str, Any]], *, seed: int = 20260420) -> dict[str, Any]:
@@ -320,6 +330,8 @@ def evaluate_longmemeval(
     progress: Callable[[int], None] | None = None,
     checkpoint: Path | None = None,
     resume: bool = False,
+    include_abstention: bool = False,
+    abstention_only: bool = False,
 ) -> dict[str, Any]:
     if limit is not None and limit < 1:
         raise ValueError("limit must be positive")
@@ -337,6 +349,8 @@ def evaluate_longmemeval(
         "implementation": "longmemeval-session-v1",
     }
     records: list[dict[str, Any]] = []
+    abstention_records: list[dict[str, Any]] = []
+    include_abstention = include_abstention or abstention_only
     seen: set[str] = set()
     skipped_abstention = 0
     with ExitStack() as stack:
@@ -385,7 +399,10 @@ def evaluate_longmemeval(
             if key in seen:
                 raise ValueError("duplicate question_id")
             seen.add(key)
-            if not instance["answer_session_ids"] or key.endswith("_abs"):
+            abstention = not instance["answer_session_ids"] or key.endswith("_abs")
+            if abstention_only and not abstention:
+                continue
+            if abstention and not include_abstention:
                 skipped_abstention += 1
                 continue
             record = saved.get(key)
@@ -397,16 +414,21 @@ def evaluate_longmemeval(
                     policy=policy,
                     scorer=scorer,
                     passages_per_session=passages_per_session,
+                    allow_abstention=abstention,
                 )
                 if journal is not None:
                     journal.write(json.dumps(record, ensure_ascii=False) + "\n")
                     journal.flush()
-            records.append(record)
+            (abstention_records if abstention else records).append(record)
+            count = len(records) + len(abstention_records)
             if progress is not None:
-                progress(len(records))
-            if limit is not None and len(records) >= limit:
+                progress(count)
+            if limit is not None and count >= limit:
                 break
-    return {
+    if not records and not abstention_records:
+        category = "eligible" if include_abstention else "answerable"
+        raise ValueError(f"no {category} questions matched the requested types and limit")
+    result = {
         "schema_version": "1.0",
         "benchmark": "LongMemEval",
         "dataset_sha256": digest,
@@ -427,9 +449,18 @@ def evaluate_longmemeval(
         "passages_per_session": passages_per_session if scorer else None,
         "passage_words": 180 if scorer else None,
         "passage_overlap_words": 40 if scorer else None,
-        "summary": summarize_records(records, seed=seed),
+        "summary": summarize_records(records, seed=seed)
+        if records
+        else {"questions": 0, "arms": {}},
         "records": records,
     }
+    if include_abstention:
+        result.update(
+            abstention_records=abstention_records,
+            abstention_questions=len(abstention_records),
+            question_scope="abstention_only" if abstention_only else "answerable_and_abstention",
+        )
+    return result
 
 
 def write_report(path: Path, report: dict[str, Any]) -> None:
