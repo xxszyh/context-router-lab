@@ -35,6 +35,9 @@ neural = [
 rerank = [
   "sentence-transformers>=3.4,<6",
 ]
+token_budget = [
+  "tokenizers>=0.20,<1",
+]
 
 [project.scripts]
 ctxlab = "context_router.cli:app"
@@ -74,6 +77,7 @@ module = [
   "model2vec", "model2vec.*",
   "huggingface_hub", "huggingface_hub.*",
   "sentence_transformers", "sentence_transformers.*",
+  "tokenizers", "tokenizers.*",
 ]
 ignore_missing_imports = true
 

@@ -89,6 +89,19 @@ questions, with a fixed generator, matched token budgets, explicit abstention,
 and the benchmark's reference answers. Until that gate is measured, generated
 answer quality remains unestablished.
 
+The offline [answer exchange](answer-exchange-2026-10-07.md) now implements the
+generation/independent-judging/reporting chain. It requires complete paired
+imports and common generator settings, hides reference labels from generation,
+and records character or declared local-tokenizer budgets. No paid calls have
+been made. A new held-out protocol and abstention experiment are still required.
+
+The full local plan contains 278 questions across hybrid/router/joint/query-only,
+1,112 generation requests, and a shared 12,000-character memory cap. Six questions
+contain identical session copies with conflicting timestamps; all dates are
+preserved and marked ambiguous, without dropping questions. Reference integer
+answers in the cleaned release are supported. The plan remains local and its
+status is pending generation, not a new answer-quality result.
+
 Model source: [MS MARCO MiniLM cross-encoder](https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2).
 This is a passage ranker trained for MS MARCO, not a model validated for long
 conversation reasoning. Its use here tests the untried joint-reading architecture.

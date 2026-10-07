@@ -26,6 +26,11 @@ raises all-gold session recall from **68.3% to 81.7%** on 278 answerable questio
 with 44 paired wins against 7 losses. The scorer stays opt-in pending an
 end-to-end answer-quality gate.
 
+The [offline answer-quality exchange](docs/answer-exchange-2026-10-07.md) now
+exports dated, budgeted generation inputs, separate blinded judging requests,
+and complete-set paired accuracy reports. It makes no model calls and reports
+quality as unmeasured until real answers and independent judgments are imported.
+
 > **The project is closed as a router and kept as a record.** The token half is established and
 > stronger than the claim; the quality half is a null result that the available judge could not have
 > resolved. Read **[`docs/termination-2026-10-02.md`](docs/termination-2026-10-02.md)** first: it

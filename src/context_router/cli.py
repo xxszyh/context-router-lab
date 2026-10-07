@@ -64,6 +64,7 @@ from context_router.evaluation.necessity import (
     required_from_ablations,
     run_ablations,
 )
+from context_router.external.answers_cli import register_answer_commands
 from context_router.external.longmemeval import HARD_TYPES, evaluate_longmemeval, write_report
 from context_router.external.scale_qa import (
     STRATA_BASELINE,
@@ -110,6 +111,7 @@ from context_router.routing.router import RoutingPolicy
 from context_router.storage import SQLiteEventStore
 
 app = typer.Typer(no_args_is_help=True, help="Context routing research harness.")
+register_answer_commands(app)
 
 
 @app.command("longmemeval")
