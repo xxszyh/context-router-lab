@@ -1,0 +1,15 @@
+[
+  {
+    "question_id": "fixture-archive-export",
+    "question_type": "multi-session",
+    "question": "Which archiver and export format did I choose?",
+    "answer": "zip and csv",
+    "haystack_session_ids": ["archive", "export", "walk"],
+    "haystack_sessions": [
+      [{"role": "user", "content": "For this project, my archiver uses zip.", "has_answer": true}],
+      [{"role": "user", "content": "The export format for this project is csv.", "has_answer": true}],
+      [{"role": "user", "content": "Today I walked to the park."}]
+    ],
+    "answer_session_ids": ["archive", "export"]
+  }
+]

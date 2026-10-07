@@ -1,0 +1,94 @@
+# Maintenance and the next quality experiment, 2026-10-07
+
+## Where the project is stuck
+
+The original real-conversation answer experiment remains a null result. The
+2026-10-02 termination statement is retained as historical evidence, including
+its later amendments. Neither synthetic evidence coverage nor session recall
+is a measurement of generated-answer quality.
+
+The most promising measured opening is the LongMemEval experiment: on its three
+hard question types, ranking left 0.247 of the default candidate list's all-gold
+ceiling unclaimed. Scalar features cannot read a question and a passage
+together. Expanding the candidate list by itself did not solve ordering.
+
+There was also an engineering blocker: the LongMemEval code existed only in
+machine-specific, unpublished scratch scripts. A reader of the public repository
+could not execute the experiment described in the documentation.
+
+## What now ships
+
+The longmemeval command streams the external dataset and reports:
+
+- BM25, dense retrieval, equal-weight RRF, and the existing router on the same questions.
+- Any-gold, all-gold, and fractional gold-session coverage, with all-gold primary.
+- Candidate misses, selection losses, and a depth-aware oracle ceiling.
+- Paired all-gold differences, exact McNemar tests and seeded bootstrap intervals.
+- Dataset SHA-256, model identifiers, candidate policy, question types and limit.
+- A separate, opt-in joint query-passage reranking arm.
+- A flushed per-question checkpoint; interrupted runs can resume only with matching
+  data and retrieval configuration. An uncommitted, incomplete final line is
+  discarded on resume; completed records remain intact. A final report is replaced atomically.
+
+Labels are only scored after retrieval. The answer text and has_answer fields
+never enter a retriever or a reranker. Missing gold sessions are validation errors;
+they are never silently removed from the denominator. Abstention cases are
+counted separately and excluded from the retrieval-success metric.
+
+The official cleaned S file repeats identical sessions in seven of its 296 hard
+questions. Identical visible transcripts under the same session id are collapsed;
+conflicting transcripts under one id are rejected. The report records collapsed
+copies. Gold sessions remain intact.
+
+The cross-encoder is pinned to an immutable revision, runs locally on CPU, and
+does not change the default router or pretend its raw scores are calibrated
+probabilities. It takes the same candidates as the fusion/router arms, picks two
+180-word passages per candidate with BM25 (40-word overlap), then max-pools the
+pair scores per session. This bounds model input and avoids silently truncating a
+long session to its opening paragraph.
+
+## Reproduce
+
+Obtain the cleaned LongMemEval_S JSON from the benchmark's official release:
+[LongMemEval](https://github.com/xiaowu0162/LongMemEval).
+The dataset is external and is not copied into this repository.
+
+~~~sh
+python -m pip install -e ".[dev,neural,rerank]"
+ctxlab longmemeval /path/to/longmemeval_s_cleaned.json .local/lme.json --embedder neural
+ctxlab longmemeval /path/to/longmemeval_s_cleaned.json .local/lme-joint.json --embedder neural --rerank
+~~~
+
+The hash embedder is the explicitly named, offline default for smoke tests. It
+does not reproduce the neural results. Neural embeddings use the existing
+model2vec provider. The LongMemEval command now pins its embedding snapshot as well
+as the cross-encoder revision, so checkpoint resume cannot mix model revisions.
+Existing callers of the embedding adapter retain their original unpinned behavior.
+
+For a first run, add --limit 30. This is a smoke test on the first 30 eligible
+questions, not a randomized holdout or a quality result. Repeat a command with
+--resume to reuse its checkpoint. The optional weights are fetched once and
+cached; HF_ENDPOINT can select a mirror when the default Hub is unreachable.
+
+## Decision rule
+
+The first full run is now complete:
+[joint reranking results](longmemeval-joint-2026-10-07.md).
+On 278 answerable questions (18 abstention cases counted separately), all-gold@5
+rose from 0.6835 for the matched-candidate fusion to 0.8165 for joint reranking,
+44 paired wins against 7 losses. This is a measured retrieval gain; answer
+quality still needs the separate gate below.
+
+Compare joint against hybrid and router on the same full set at the same depth,
+and report its runtime. A retrieval gain is established only when both paired
+tests pass the repository's existing rule. An unsuccessful reranker remains
+experimental; it is not promoted to a default to make the project look successful.
+
+If retrieval improves, the next gate is end-to-end answer accuracy on held-out
+questions, with a fixed generator, matched token budgets, explicit abstention,
+and the benchmark's reference answers. Until that gate is measured, generated
+answer quality remains unestablished.
+
+Model source: [MS MARCO MiniLM cross-encoder](https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2).
+This is a passage ranker trained for MS MARCO, not a model validated for long
+conversation reasoning. Its use here tests the untried joint-reading architecture.

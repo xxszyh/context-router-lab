@@ -14,6 +14,18 @@ The project does not try to be another memory OS or vector-RAG framework. It exi
 measure whether **selective context assembly** is worth building at all, and only then to
 build it.
 
+**Maintenance resumed, 2026-10-07.** The historical research verdict below is
+preserved. The external LongMemEval experiment now has a portable, tested CLI,
+paired all-gold metrics, interruption-safe checkpoints, and an optional pinned
+joint query-passage reranker. See
+[the maintenance plan and reproduction commands](docs/maintenance-2026-10-07.md).
+Generated-answer quality remains unestablished; session retrieval is measured separately.
+
+The first [full external reranking run](docs/longmemeval-joint-2026-10-07.md)
+raises all-gold session recall from **68.3% to 81.7%** on 278 answerable questions,
+with 44 paired wins against 7 losses. The scorer stays opt-in pending an
+end-to-end answer-quality gate.
+
 > **The project is closed as a router and kept as a record.** The token half is established and
 > stronger than the claim; the quality half is a null result that the available judge could not have
 > resolved. Read **[`docs/termination-2026-10-02.md`](docs/termination-2026-10-02.md)** first: it
@@ -83,6 +95,21 @@ assemble_context(request: AssemblyRequest, decision: RouteDecision) -> WorkingCo
 ```
 
 ## Install
+
+Optional neural retrieval and joint reranking:
+
+~~~sh
+python -m pip install -e ".[dev]"
+ctxlab longmemeval datasets/fixtures/longmemeval-smoke.json .local/smoke.json
+python -m pip install -e ".[dev,neural,rerank]"
+ctxlab longmemeval /path/to/longmemeval_s_cleaned.json .local/lme.json --embedder neural
+ctxlab longmemeval /path/to/longmemeval_s_cleaned.json .local/joint.json --embedder neural --rerank
+~~~
+
+Use --limit 30 for a first smoke test and --resume to continue an interrupted
+run. The reports explicitly mark answer quality as not measured.
+The included fixture is fictional and only tests the workflow; it is not
+benchmark evidence.
 
 ```bash
 python -m venv .venv
