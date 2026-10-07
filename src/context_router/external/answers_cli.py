@@ -16,10 +16,91 @@ from context_router.external.longmemeval_answers import (
     score_answer_plan,
 )
 from context_router.external.longmemeval_rendering import LEGACY_RENDERING
+from context_router.external.quality_comparison import (
+    QualityCriteria,
+    prepare_quality_comparison,
+    prepare_quality_judgments,
+    score_quality_comparison,
+)
 from context_router.external.rendering_audit import audit_answer_plans
 
 
 def register_answer_commands(app: typer.Typer) -> None:
+    @app.command("longmemeval-quality-plan")
+    def quality_plan_command(
+        baseline: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+        candidate: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+        output: Path,
+        arm: str = "joint",
+        seed: int = 20261007,
+        minimum_accuracy_gain: Annotated[float, typer.Option(min=0, max=1)] = 0.0,
+        maximum_failed_completion_increase: Annotated[float, typer.Option(min=0, max=1)] = 0.0,
+        maximum_mean_memory_ratio: Annotated[float, typer.Option(min=0.01)] = 1.0,
+        maximum_exact_mcnemar_p: Annotated[float, typer.Option(min=0, max=1)] = 0.05,
+    ) -> None:
+        """Freeze one cross-rendering comparison and mix its public generation requests."""
+        try:
+            result = prepare_quality_comparison(
+                baseline,
+                candidate,
+                output,
+                arm=arm,
+                seed=seed,
+                criteria=QualityCriteria(
+                    minimum_accuracy_gain,
+                    maximum_failed_completion_increase,
+                    maximum_mean_memory_ratio,
+                    maximum_exact_mcnemar_p,
+                ),
+            )
+        except ValueError as error:
+            raise typer.BadParameter(str(error)) from error
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+        typer.echo("Answer quality: not measured. The inspected sample remains exploratory.")
+
+    @app.command("longmemeval-quality-judge-plan")
+    def quality_judge_command(
+        comparison: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+        answers: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+        output: Path,
+    ) -> None:
+        """Mix both renderings into one blinded, reference-based judging batch."""
+        try:
+            result = prepare_quality_judgments(comparison, answers, output)
+        except ValueError as error:
+            raise typer.BadParameter(str(error)) from error
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+    @app.command("longmemeval-quality-score")
+    def quality_score_command(
+        comparison: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+        answers: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+        judgments: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+        output: Path,
+    ) -> None:
+        """Compare complete matched answers using the frozen primary arm and criteria."""
+        protected = [
+            comparison,
+            answers,
+            judgments,
+            *comparison.parent.glob("*.private.json"),
+            comparison.parent / "generation.requests.jsonl",
+        ]
+        if output.exists() or {
+            output.resolve(),
+            output.with_name(output.name + ".tmp").resolve(),
+        } & {path.resolve() for path in protected}:
+            raise typer.BadParameter("choose a new output file; inputs must remain intact")
+        try:
+            result = score_quality_comparison(comparison, answers, judgments)
+        except ValueError as error:
+            raise typer.BadParameter(str(error)) from error
+        write_report(output, result)
+        typer.echo(json.dumps(result["sample_gate"], ensure_ascii=False, indent=2))
+        typer.echo(
+            "Scope: exploratory. Independent validation is required before default promotion."
+        )
+
     @app.command("longmemeval-render-audit")
     def render_audit_command(
         dataset: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],

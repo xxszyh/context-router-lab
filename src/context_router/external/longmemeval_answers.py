@@ -285,7 +285,7 @@ def prepare_answer_plan(
         directory = Path(temporary) / "bundle"
         directory.mkdir()
         write_report(directory / "plan.private.json", plan)
-        _write_lines(
+        write_exchange_rows(
             directory / "generation.requests.jsonl",
             [
                 {key: row[key] for key in ("request_id", "prompt_sha256", "instructions", "prompt")}
@@ -313,7 +313,7 @@ def prepare_answer_plan(
     return status
 
 
-def _write_lines(path: Path, rows: list[dict[str, Any]]) -> None:
+def write_exchange_rows(path: Path, rows: list[dict[str, Any]]) -> None:
     path.write_text(
         "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8"
     )
@@ -328,7 +328,8 @@ def load_plan(path: Path) -> dict[str, Any]:
     return plan
 
 
-def _indexed_lines(path: Path, expected: set[str]) -> dict[str, dict[str, Any]]:
+def load_exchange_rows(path: Path, expected: set[str]) -> dict[str, dict[str, Any]]:
+    """Require exactly one row per declared request, without dropping failed requests."""
     rows: dict[str, dict[str, Any]] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
@@ -346,7 +347,15 @@ def _indexed_lines(path: Path, expected: set[str]) -> dict[str, dict[str, Any]]:
 
 
 def load_answers(plan: dict[str, Any], path: Path) -> dict[str, dict[str, Any]]:
-    rows = _indexed_lines(path, {row["request_id"] for row in plan["rows"]})
+    rows = load_exchange_rows(path, {row["request_id"] for row in plan["rows"]})
+    validate_answer_rows(plan, rows)
+    return rows
+
+
+def validate_answer_rows(plan: dict[str, Any], rows: dict[str, dict[str, Any]]) -> None:
+    """Validate a complete exchange, including an in-memory cross-plan subset."""
+    if set(rows) != {row["request_id"] for row in plan["rows"]}:
+        raise ValueError("incomplete paired answer set")
     models: set[str] = set()
     settings: set[str] = set()
     for request in plan["rows"]:
@@ -380,7 +389,6 @@ def load_answers(plan: dict[str, Any], path: Path) -> dict[str, dict[str, Any]]:
     declared = plan["budget"].get("generator_model")
     if declared is not None and models != {declared}:
         raise ValueError("generator model does not match the budget tokenizer declaration")
-    return rows
 
 
 def judge_prompt(
@@ -437,6 +445,17 @@ def prepare_judge_requests(plan_file: Path, answers_file: Path, output: Path) ->
         raise ValueError("judge output already exists")
     plan = load_plan(plan_file)
     answers = load_answers(plan, answers_file)
+    rows = judge_requests_for_rows(plan, answers)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    write_exchange_rows(output, rows)
+    return {"status": "pending_judgments", "requests": len(rows), "answer_quality": "not_measured"}
+
+
+def judge_requests_for_rows(
+    plan: dict[str, Any], answers: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Build blinded requests using the same task and failure policy for any complete plan."""
+    validate_answer_rows(plan, answers)
     rows = [
         {
             "request_id": row["request_id"],
@@ -455,9 +474,7 @@ def prepare_judge_requests(plan_file: Path, answers_file: Path, output: Path) ->
         for row in plan["rows"]
     ]
     random.Random(plan["seed"]).shuffle(rows)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    _write_lines(output, rows)
-    return {"status": "pending_judgments", "requests": len(rows), "answer_quality": "not_measured"}
+    return rows
 
 
 def _answer_summary(records: list[dict[str, Any]], arms: list[str]) -> dict[str, Any]:
@@ -529,7 +546,24 @@ def score_answer_plan(
 ) -> dict[str, Any]:
     plan = load_plan(plan_file)
     answers = load_answers(plan, answers_file)
-    judgments = _indexed_lines(judgments_file, set(answers))
+    judgments = load_exchange_rows(judgments_file, set(answers))
+    result = score_answer_rows(plan, answers, judgments, seed=seed)
+    result["answers_sha256"] = file_hash(answers_file)
+    result["judgments_sha256"] = file_hash(judgments_file)
+    return result
+
+
+def score_answer_rows(
+    plan: dict[str, Any],
+    answers: dict[str, dict[str, Any]],
+    judgments: dict[str, dict[str, Any]],
+    *,
+    seed: int = 20261007,
+) -> dict[str, Any]:
+    """Apply the same completion and judging policy to a complete in-memory exchange."""
+    validate_answer_rows(plan, answers)
+    if set(judgments) != set(answers):
+        raise ValueError("incomplete paired judgment set")
     judges: set[str] = set()
     judge_configs: set[str] = set()
     records = []
@@ -548,8 +582,10 @@ def score_answer_plan(
             raise ValueError("judgment configuration must be a non-empty object")
         judge_configs.add(object_hash(judge_config))
         truncated = answer["stop_reason"] in ("length", "max_tokens", "incomplete")
-        completed = answer["stop_reason"] in ("stop", "end_turn", "completed")
-        correct = judgment["correct"] and bool(answer["hypothesis"].strip()) and completed
+        completed = answer["stop_reason"] in ("stop", "end_turn", "completed") and bool(
+            answer["hypothesis"].strip()
+        )
+        correct = judgment["correct"] and completed
         if (
             judgment.get("judgment_origin") == "failed_generation_policy"
             and completed
@@ -586,8 +622,6 @@ def score_answer_plan(
         "status": "complete",
         "answer_quality": "judged_reference_accuracy",
         "plan_sha256": plan["plan_sha256"],
-        "answers_sha256": file_hash(answers_file),
-        "judgments_sha256": file_hash(judgments_file),
         "seed": seed,
         "generator_model": next(iter(answers.values()))["model"],
         "judge_model": next(iter(judges)),

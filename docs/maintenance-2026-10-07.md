@@ -136,6 +136,21 @@ This phase passes 348 tests, Ruff, strict mypy and a wheel build. Two new full i
 plans remain pending generation. These are exploratory input-retention results,
 with unchanged sessions and budget caps; they do not establish answer accuracy.
 
+The [cross-rendering quality comparison](quality-comparison-2026-10-07.md) now
+exports a frozen primary joint comparison over all 278 questions: 556 mixed,
+blinded generation inputs, followed by one common judging batch and question-ID
+aligned paired answer scoring. Dataset, retrieval, budget, questions, references
+and selected sessions must match. Missing imports, stale hashes, mixed settings
+and a judge sharing the generator's identifier are rejected. Empty normal-stop
+answers now also contribute to the failed-completion rate. Sample criteria cover
+accuracy, failures and memory; inspected data cannot authorize default promotion.
+
+This phase passes 389 tests, Ruff lint/format and strict mypy. All 556 projected
+prompts reproduce the archived source inputs in a real-data rendering audit; the
+old source plan hashes remain intact. Local batch preview makes zero calls and
+writes no answers. The generator/configuration is not yet selected or frozen,
+answers and independent judgments remain pending, and GUI work stays paused.
+
 Model source: [MS MARCO MiniLM cross-encoder](https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2).
 This is a passage ranker trained for MS MARCO, not a model validated for long
 conversation reasoning. Its use here tests the untried joint-reading architecture.

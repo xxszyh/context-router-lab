@@ -42,6 +42,13 @@ Whole-turn BM25 selection raises strict retention from **44.35% to 70.56%** for 
 joint arm's 248 annotation-eligible questions, with 70 paired wins and five losses;
 30 unknown-annotation questions remain explicit. All new renderers stay opt-in.
 
+The [cross-rendering quality comparison](docs/quality-comparison-2026-10-07.md)
+now freezes one primary arm, matched inputs and sample criteria, mixes both policies'
+generation and blinded judging batches, and aligns paired answer scores by question ID.
+The real-data joint export contains 278 pairs, **556 requests**, all pending generation.
+Mixed models/settings, missing judgments and self-judging are rejected; empty or
+truncated responses remain wrong. This inspected sample cannot authorize default promotion.
+
 > **The project is closed as a router and kept as a record.** The token half is established and
 > stronger than the claim; the quality half is a null result that the available judge could not have
 > resolved. Read **[`docs/termination-2026-10-02.md`](docs/termination-2026-10-02.md)** first: it
