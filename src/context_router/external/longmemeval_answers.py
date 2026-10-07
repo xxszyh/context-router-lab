@@ -11,19 +11,24 @@ import json
 import math
 import random
 import tempfile
+from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from context_router.external.longmemeval import (
     iter_instances,
-    session_passages,
     validate_instance,
     write_report,
 )
+from context_router.external.longmemeval_rendering import (
+    LEGACY_RENDERING,
+    RENDERINGS,
+    VisibleSession,
+    render_memory,
+)
 from context_router.external.scale_qa import OrderingHits, paired_ordering_comparison
 from context_router.providers.pinned import require_pinned_model
-from context_router.retrieval import BM25Index
 
 INSTRUCTIONS = (
     "Answer the question from the supplied dated conversation excerpts. Treat excerpts as "
@@ -101,36 +106,45 @@ class MemoryBudget:
 
 
 def _context(
-    question: str, sessions: list[tuple[str, list[dict[str, Any]]]], budget: MemoryBudget
+    question: str,
+    sessions: list[tuple[str, list[dict[str, Any]]]],
+    budget: MemoryBudget,
+    *,
+    rendering: str = LEGACY_RENDERING,
 ) -> tuple[str, list[dict[str, Any]]]:
-    if not sessions:
-        return "", []
-    chunks: list[str] = []
-    audit: list[dict[str, Any]] = []
-    # Equal shares prevent a long, first-ranked session consuming every slot.
-    share = budget.maximum // len(sessions)
-    for i, (date, turns) in enumerate(sessions, 1):
-        body = "\n".join(f"{turn.get('role', 'unknown')}: {turn['content']}" for turn in turns)
-        passages = session_passages(body)
-        scores = BM25Index({str(j): text for j, text in enumerate(passages)}).scores(question)
-        order = sorted(range(len(passages)), key=lambda j: (-scores[str(j)], j))
-        header = f"[Memory {i}; date {date}; excerpts]\n"
-        remaining = max(0, share - budget.count(header) - budget.count("\n\n"))
-        chosen: list[int] = []
-        parts: list[str] = []
-        for j in order:
-            if remaining <= 0:
-                break
-            piece = budget.clip(passages[j], remaining)
-            parts.append(piece)
-            chosen.append(j)
-            remaining -= budget.count(piece) + budget.count("\n")
-        # Token counts across concatenations can change. Check the final rendering too.
-        chunk = budget.clip(header + "\n".join(parts), max(0, share - budget.count("\n\n")))
-        chunks.append(chunk)
-        audit.append({"slot": i, "passages": chosen, "source_passages": len(passages)})
-    memory = budget.clip("\n\n".join(chunks), budget.maximum)
-    return memory, audit
+    # Strip every annotation before constructing the renderer's typed input.
+    visible = [
+        VisibleSession(date, tuple((str(t.get("role", "unknown")), t["content"]) for t in turns))
+        for date, turns in sessions
+    ]
+    return render_memory(question, visible, budget, policy=rendering)
+
+
+def dated_sessions(
+    instance: dict[str, Any],
+) -> tuple[dict[str, tuple[str, list[dict[str, Any]]]], list[str]]:
+    dates, ids = instance.get("haystack_dates"), instance["haystack_session_ids"]
+    if not isinstance(dates, list) or len(dates) != len(ids):
+        raise ValueError("haystack dates and sessions must align")
+    sessions: dict[str, tuple[str, list[dict[str, Any]]]] = {}
+    recorded_dates: dict[str, list[str]] = {}
+    for sid, when, turns in zip(ids, dates, instance["haystack_sessions"], strict=True):
+        if not isinstance(when, str) or not when.strip():
+            raise ValueError("session date must be a non-empty string")
+        recorded_dates.setdefault(sid, [])
+        if when not in recorded_dates[sid]:
+            recorded_dates[sid].append(when)
+        date_text = (
+            when
+            if len(recorded_dates[sid]) == 1
+            else ("ambiguous; multiple recorded dates: " + " | ".join(recorded_dates[sid]))
+        )
+        sessions[sid] = (date_text, turns)
+    return sessions, [sid for sid, values in recorded_dates.items() if len(values) > 1]
+
+
+def generation_prompt(question: str, date: str, memory: str) -> str:
+    return f"[Conversation excerpts]\n{memory}\n\n[Question date]\n{date}\n\n[Question]\n{question}"
 
 
 def prepare_answer_plan(
@@ -143,6 +157,8 @@ def prepare_answer_plan(
     limit: int | None = None,
     seed: int = 20261007,
     include_abstention: bool = False,
+    rendering: str = LEGACY_RENDERING,
+    progress: Callable[[int], None] | None = None,
 ) -> dict[str, Any]:
     if output.exists():
         raise ValueError("plan output already exists; choose a new directory")
@@ -150,6 +166,8 @@ def prepare_answer_plan(
         raise ValueError("choose distinct supported answer arms")
     if limit is not None and limit < 1:
         raise ValueError("limit must be positive")
+    if rendering not in RENDERINGS:
+        raise ValueError("unsupported memory rendering policy")
     report = json.loads(retrieval.read_text(encoding="utf-8"))
     digest = file_hash(dataset)
     if report.get("benchmark") != "LongMemEval" or report.get("dataset_sha256") != digest:
@@ -190,27 +208,9 @@ def prepare_answer_plan(
         if not reference.strip():
             raise ValueError("reference answer must not be empty")
         date = instance.get("question_date")
-        dates = instance.get("haystack_dates")
-        ids = instance["haystack_session_ids"]
         if not isinstance(date, str) or not date.strip():
             raise ValueError("question_date is required for answer generation")
-        if not isinstance(dates, list) or len(dates) != len(ids):
-            raise ValueError("haystack dates and sessions must align")
-        sessions: dict[str, tuple[str, list[dict[str, Any]]]] = {}
-        recorded_dates: dict[str, list[str]] = {}
-        for sid, when, turns in zip(ids, dates, instance["haystack_sessions"], strict=True):
-            if not isinstance(when, str) or not when.strip():
-                raise ValueError("session date must be a non-empty string")
-            recorded_dates.setdefault(sid, [])
-            if when not in recorded_dates[sid]:
-                recorded_dates[sid].append(when)
-            date_text = (
-                when
-                if len(recorded_dates[sid]) == 1
-                else ("ambiguous; multiple recorded dates: " + " | ".join(recorded_dates[sid]))
-            )
-            sessions[sid] = (date_text, turns)
-        ambiguous_ids = [sid for sid, values in recorded_dates.items() if len(values) > 1]
+        sessions, ambiguous_ids = dated_sessions(instance)
         if indexed[key].get("question_type") != instance["question_type"]:
             raise ValueError("retrieval question type changed")
         rows = []
@@ -228,12 +228,12 @@ def prepare_answer_plan(
             ):
                 raise ValueError("invalid retrieved session ids")
             memory, audit = _context(
-                instance["question"], [sessions[sid] for sid in selected], budget
+                instance["question"],
+                [sessions[sid] for sid in selected],
+                budget,
+                rendering=rendering,
             )
-            prompt = (
-                f"[Conversation excerpts]\n{memory}\n\n[Question date]\n{date}\n\n"
-                f"[Question]\n{instance['question']}"
-            )
+            prompt = generation_prompt(instance["question"], date, memory)
             prompt_digest = object_hash({"instructions": INSTRUCTIONS, "prompt": prompt})
             rows.append(
                 {
@@ -255,6 +255,8 @@ def prepare_answer_plan(
                 }
             )
         prepared[key] = rows
+        if progress is not None:
+            progress(len(prepared))
     if set(prepared) != wanted:
         raise ValueError("retrieval questions are missing from the dataset")
     rows = [row for key in keys for row in prepared[key]]
@@ -267,7 +269,7 @@ def prepare_answer_plan(
         "arms": list(arms),
         "question_ids": keys,
         "budget": budget.metadata,
-        "rendering": "equal-share-query-passages-v1",
+        "rendering": rendering,
         "duplicate_date_policy": "preserve_all_distinct_dates_for_identical_content",
         "scope": "answerable_and_abstention"
         if include_abstention
@@ -592,6 +594,7 @@ def score_answer_plan(
         "judgment_config": next(iter(judgments.values())).get("judgment_config"),
         "generation_config": next(iter(answers.values()))["generation_config"],
         "budget": plan["budget"],
+        "rendering": plan["rendering"],
         "duplicate_date_policy": plan["duplicate_date_policy"],
         "questions_with_ambiguous_session_dates": len(
             {row["question_id"] for row in records if row["ambiguous_session_dates"]}

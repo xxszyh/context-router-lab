@@ -34,6 +34,14 @@ An opt-in local batch runner now previews by default, supports durable resume an
 explicit failure retries, and validates model identity and completion status.
 Abstention experiments keep their own denominators and never inflate retrieval recall.
 
+[Rendered-evidence auditing](docs/rendering-audit-2026-10-07.md) now reconstructs
+archived prompts and separates session-retrieval misses from losses during budgeted
+rendering. An opt-in chronological union removes overlapping source spans while
+keeping within-session order. This measures annotated-span retention, not answer accuracy.
+Whole-turn BM25 selection raises strict retention from **44.35% to 70.56%** for the
+joint arm's 248 annotation-eligible questions, with 70 paired wins and five losses;
+30 unknown-annotation questions remain explicit. All new renderers stay opt-in.
+
 > **The project is closed as a router and kept as a record.** The token half is established and
 > stronger than the claim; the quality half is a null result that the available judge could not have
 > resolved. Read **[`docs/termination-2026-10-02.md`](docs/termination-2026-10-02.md)** first: it

@@ -15,9 +15,54 @@ from context_router.external.longmemeval_answers import (
     prepare_judge_requests,
     score_answer_plan,
 )
+from context_router.external.longmemeval_rendering import LEGACY_RENDERING
+from context_router.external.rendering_audit import audit_answer_plans
 
 
 def register_answer_commands(app: typer.Typer) -> None:
+    @app.command("longmemeval-render-audit")
+    def render_audit_command(
+        dataset: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+        plan: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+        output: Path,
+        compare_plan: Annotated[Path | None, typer.Option(exists=True, dir_okay=False)] = None,
+        tokenizer_file: Annotated[Path | None, typer.Option(exists=True, dir_okay=False)] = None,
+        seed: int = 20261007,
+    ) -> None:
+        """Audit rendered source spans; optionally compare two matched rendering plans."""
+        inputs = [dataset, plan, *([compare_plan] if compare_plan is not None else [])]
+        if output.exists() or {
+            output.resolve(),
+            output.with_name(output.name + ".tmp").resolve(),
+        } & {path.resolve() for path in inputs}:
+            raise typer.BadParameter("choose a new output file; inputs must remain intact")
+        try:
+            result = audit_answer_plans(
+                dataset,
+                [plan, *([compare_plan] if compare_plan is not None else [])],
+                tokenizer_file=tokenizer_file,
+                seed=seed,
+                progress=lambda count: (
+                    typer.echo(f"Audited {count} questions") if count % 25 == 0 else None
+                ),
+            )
+        except (ValueError, ImportError) as error:
+            raise typer.BadParameter(str(error)) from error
+        write_report(output, result)
+        typer.echo(
+            json.dumps(
+                [
+                    {"rendering": item["rendering"], "summary": item["summary"]}
+                    for item in result["plans"]
+                ],
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        typer.echo(
+            "Answer quality: not measured. This audits source-span retention, not correctness."
+        )
+
     @app.command("longmemeval-run")
     def run_command(
         requests: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
@@ -79,6 +124,7 @@ def register_answer_commands(app: typer.Typer) -> None:
         limit: Annotated[int | None, typer.Option(min=1)] = None,
         seed: int = 20261007,
         include_abstention: bool = False,
+        rendering: str = LEGACY_RENDERING,
     ) -> None:
         """Export dated, budgeted prompts. Makes no model calls."""
         try:
@@ -93,6 +139,10 @@ def register_answer_commands(app: typer.Typer) -> None:
                 limit=limit,
                 seed=seed,
                 include_abstention=include_abstention,
+                rendering=rendering,
+                progress=lambda count: (
+                    typer.echo(f"Prepared {count} questions") if count % 25 == 0 else None
+                ),
             )
         except (ValueError, ImportError) as error:
             raise typer.BadParameter(str(error)) from error

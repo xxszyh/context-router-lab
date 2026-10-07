@@ -32,6 +32,14 @@ ctxlab longmemeval-answer-plan /path/to/longmemeval_s_cleaned.json .local/joint.
 不进入生成输入。每条被选会话分配相同预算，用相同的 BM25 策略挑选片段。
 这项渲染策略与先前只测会话召回的实验不同，必须作为新实验报告。
 
+可选 `--rendering chronological-union-v2` 合并重叠窗口并保留会话内原顺序、原始空白，
+在完整来源词边界上匹配预算。默认仍为原来的 equal-share-query-passages-v1。
+可选 `--rendering whole-turn-bm25-v3` 则按完整发言做 BM25 选择，保留原顺序；
+发言都放不下时回退到有界窗口，不读取证据标签或偏好某个发言角色。
+各策略的来源审计、指标局限及离线比较命令见
+[渲染后的证据保留审计](rendering-audit-2026-10-07.md)。审计读取标注只用于测量，
+不会把标注交给生成模型，也不把保留率称为回答准确率。
+
 官方 cleaned S 数据中有 32 个整数参考答案，导入时转为文字用于判分。
 内容相同的重复会话可能带不同日期：正文去重，但保留所有不同日期并在输入中
 标记 ambiguous，不选取最早/最晚值、不删除该题。status 和私人计划记录这类

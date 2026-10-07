@@ -123,6 +123,19 @@ wheel build. Validation uses mock transports and offline fixtures; no desktop
 input or live generation is involved. The real-data refusal plan remains
 pending_generation, with one question containing ambiguous duplicate-session dates.
 
+The next [rendering audit](rendering-audit-2026-10-07.md) reproduces all archived
+generation inputs and finds 101 strict annotated-turn rendering losses among 211
+successful, annotation-eligible joint retrievals. A chronological overlap union
+does not improve full retention (one paired win and one loss), so it is not promoted.
+Whole-turn BM25 selection improves strict retention from 110/248 to 175/248,
+70 paired wins against five losses; the same 30 unknown-annotation questions are
+explicitly excluded from this span metric, not from session recall or answer scoring.
+The full-turn renderer remains opt-in, and the original answer-quality null is intact.
+
+This phase passes 348 tests, Ruff, strict mypy and a wheel build. Two new full input
+plans remain pending generation. These are exploratory input-retention results,
+with unchanged sessions and budget caps; they do not establish answer accuracy.
+
 Model source: [MS MARCO MiniLM cross-encoder](https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2).
 This is a passage ranker trained for MS MARCO, not a model validated for long
 conversation reasoning. Its use here tests the untried joint-reading architecture.
