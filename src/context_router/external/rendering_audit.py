@@ -20,7 +20,7 @@ from context_router.external.longmemeval_answers import (
     object_hash,
     text_hash,
 )
-from context_router.external.longmemeval_rendering import index_session
+from context_router.external.longmemeval_rendering import FULL_HISTORY_RENDERING, index_session
 from context_router.external.scale_qa import OrderingHits, paired_ordering_comparison
 
 
@@ -165,6 +165,14 @@ def audit_answer_plans(
                 ids = row["selected_session_ids"]
                 if ids != original_ids:
                     raise ValueError("paired rendering audit must not change selected sessions")
+                if plan["rendering"] == FULL_HISTORY_RENDERING and (
+                    arm != "full_history"
+                    or ids != list(sessions)
+                    or row.get("source_session_count") != len(sessions)
+                ):
+                    raise ValueError(
+                        "complete-history control must preserve every unique source session"
+                    )
                 if (
                     row["question"] != instance["question"]
                     or row["question_type"] != instance["question_type"]

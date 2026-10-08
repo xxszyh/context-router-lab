@@ -1,4 +1,4 @@
-"""A frozen, blinded comparison of two memory renderings, without model calls.
+"""Frozen, blinded rendering and complete-history controls, without model calls.
 
 The inspected sample stays exploratory. Content hashes bind artifacts to a design;
 they do not prove that the design was registered before somebody saw answers.
@@ -16,7 +16,9 @@ from typing import Any
 
 from context_router.external.longmemeval import write_report
 from context_router.external.longmemeval_answers import (
-    SUPPORTED_ARMS,
+    BOUNDED_MEMORY,
+    COMPLETE_HISTORY,
+    DEFAULT_ARMS,
     file_hash,
     judge_requests_for_rows,
     load_exchange_rows,
@@ -26,7 +28,7 @@ from context_router.external.longmemeval_answers import (
     validate_answer_rows,
     write_exchange_rows,
 )
-from context_router.external.longmemeval_rendering import RENDERINGS
+from context_router.external.longmemeval_rendering import FULL_HISTORY_RENDERING, RENDERINGS
 from context_router.external.scale_qa import OrderingHits, paired_ordering_comparison
 
 SIDES = ("baseline", "candidate")
@@ -59,25 +61,40 @@ DEFAULT_CRITERIA = QualityCriteria()
 
 
 def _matched_rows(
-    plans: dict[str, dict[str, Any]], arm: str
+    plans: dict[str, dict[str, Any]], arm: str, comparison_kind: str = "rendering"
 ) -> dict[str, dict[str, dict[str, Any]]]:
-    if arm not in SUPPORTED_ARMS or arm == "query_only":
+    if comparison_kind not in ("rendering", "full-history"):
+        raise ValueError("comparison kind must be rendering or full-history")
+    if arm not in DEFAULT_ARMS or arm == "query_only":
         raise ValueError("choose a memory arm: joint, hybrid or router")
     first = plans["baseline"]
     common = ("dataset_sha256", "retrieval_sha256", "budget", "duplicate_date_policy", "scope")
     indexed = {}
     for side, plan in plans.items():
+        selected_arm = (
+            "full_history" if comparison_kind == "full-history" and side == "baseline" else arm
+        )
         if any(plan[field] != first[field] for field in common):
             raise ValueError("rendering comparison requires matched dataset, retrieval and budget")
         if plan["rendering"] not in RENDERINGS:
             raise ValueError("unknown rendering policy")
+        complete = selected_arm == "full_history"
+        expected_cap = COMPLETE_HISTORY if complete else BOUNDED_MEMORY
+        if (
+            plan.get("memory_cap_policy", BOUNDED_MEMORY) != expected_cap
+            or (plan["rendering"] == FULL_HISTORY_RENDERING) != complete
+        ):
+            raise ValueError(
+                "comparison requires an explicit complete-history baseline and bounded candidate"
+            )
         questions = plan["question_ids"]
         if (
             not questions
             or any(not isinstance(q, str) or not q for q in questions)
             or len(set(questions)) != len(questions)
             or set(questions) != set(first["question_ids"])
-            or arm not in plan["arms"]
+            or selected_arm not in plan["arms"]
+            or (complete and plan["arms"] != ["full_history"])
         ):
             raise ValueError("comparison requires the same complete question set and selected arm")
         rows = {(row["question_id"], row["arm"]): row for row in plan["rows"]}
@@ -86,29 +103,39 @@ def _matched_rows(
             raise ValueError("plan must contain exactly one row per question and arm")
         if len({row["request_id"] for row in plan["rows"]}) != len(plan["rows"]):
             raise ValueError("plan request ids must be unique")
-        indexed[side] = {q: rows[q, arm] for q in questions}
+        indexed[side] = {q: rows[q, selected_arm] for q in questions}
         for row in indexed[side].values():
             if type(row.get("expects_refusal", False)) is not bool:
                 raise ValueError("refusal flags must be JSON booleans")
             if (
                 type(row["memory_units"]) is not int
-                or not 0 <= row["memory_units"] <= plan["budget"]["maximum"]
+                or row["memory_units"] < 0
+                or (not complete and row["memory_units"] > plan["budget"]["maximum"])
             ):
                 raise ValueError("memory units must be a nonnegative integer within the budget")
+            if complete and (
+                type(row.get("source_session_count")) is not int
+                or row["source_session_count"] != len(row["selected_session_ids"])
+                or len(set(row["selected_session_ids"])) != row["source_session_count"]
+            ):
+                raise ValueError(
+                    "complete-history baseline must declare all unique source sessions"
+                )
             if row["prompt_sha256"] != object_hash(
                 {"instructions": row["instructions"], "prompt": row["prompt"]}
             ):
                 raise ValueError("plan prompt failed its integrity check")
     if plans["baseline"]["rendering"] == plans["candidate"]["rendering"]:
         raise ValueError("comparison needs distinct rendering policies")
-    fields = (
+    fields: tuple[str, ...] = (
         "question",
         "question_type",
         "reference",
         "instructions",
-        "selected_session_ids",
         "ambiguous_date_session_ids",
     )
+    if comparison_kind == "rendering":
+        fields = (*fields, "selected_session_ids")
     for question, before in indexed["baseline"].items():
         after = indexed["candidate"][question]
         if any(before[field] != after[field] for field in fields) or before.get(
@@ -128,6 +155,7 @@ def prepare_quality_comparison(
     output: Path,
     *,
     arm: str = "joint",
+    comparison_kind: str = "rendering",
     seed: int = 20261007,
     criteria: QualityCriteria = DEFAULT_CRITERIA,
 ) -> dict[str, Any]:
@@ -135,7 +163,7 @@ def prepare_quality_comparison(
         raise ValueError("comparison output already exists; choose a new directory")
     sources = dict(zip(SIDES, (baseline_file, candidate_file), strict=True))
     originals = {side: load_plan(path) for side, path in sources.items()}
-    indexed = _matched_rows(originals, arm)
+    indexed = _matched_rows(originals, arm, comparison_kind)
     questions = sorted(originals["baseline"]["question_ids"])
     plans: dict[str, dict[str, Any]] = {}
     requests: list[dict[str, Any]] = []
@@ -152,7 +180,9 @@ def prepare_quality_comparison(
         ]
         plan = {
             **source,
-            "arms": [arm],
+            "arms": [
+                "full_history" if comparison_kind == "full-history" and side == "baseline" else arm
+            ],
             "question_ids": questions,
             "rows": rows,
             "seed": seed,
@@ -202,6 +232,10 @@ def prepare_quality_comparison(
         "sample_is_held_out": False,
         "generation_configuration_frozen": False,
     }
+    if comparison_kind == "full-history":
+        for metadata in (manifest, status):
+            metadata["comparison_kind"] = comparison_kind
+            metadata["baseline_arm"] = "full_history"
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=output.parent) as temporary:
         directory = Path(temporary) / "comparison"
@@ -226,6 +260,12 @@ def load_quality_comparison(path: Path) -> tuple[dict[str, Any], dict[str, dict[
     if set(manifest["criteria"]) != set(asdict(DEFAULT_CRITERIA)):
         raise ValueError("comparison must explicitly freeze every quality criterion")
     QualityCriteria(**manifest["criteria"])
+    comparison_kind = manifest.get("comparison_kind", "rendering")
+    baseline_arm = "full_history" if comparison_kind == "full-history" else manifest["primary_arm"]
+    if manifest.get("baseline_arm", baseline_arm) != baseline_arm or (
+        comparison_kind == "full-history" and manifest.get("baseline_arm") != baseline_arm
+    ):
+        raise ValueError("comparison baseline arm does not match its kind")
     plans = {}
     for side in SIDES:
         entry = manifest["plans"][side]
@@ -236,7 +276,7 @@ def load_quality_comparison(path: Path) -> tuple[dict[str, Any], dict[str, dict[
             plan["plan_sha256"] != entry["plan_sha256"]
             or plan["source_plan_sha256"] != entry["source_plan_sha256"]
             or plan["rendering"] != entry["rendering"]
-            or plan["arms"] != [manifest["primary_arm"]]
+            or plan["arms"] != [baseline_arm if side == "baseline" else manifest["primary_arm"]]
             or plan["question_ids"] != manifest["question_ids"]
             or plan["seed"] != manifest["seed"]
             or any(plan[f] != manifest[f] for f in ("dataset_sha256", "retrieval_sha256", "budget"))
@@ -248,7 +288,7 @@ def load_quality_comparison(path: Path) -> tuple[dict[str, Any], dict[str, dict[
         ):
             raise ValueError("comparison's frozen plan changed")
         plans[side] = plan
-    _matched_rows(plans, manifest["primary_arm"])
+    _matched_rows(plans, manifest["primary_arm"], comparison_kind)
     if (
         file_hash(path.parent / "generation.requests.jsonl")
         != manifest["generation_requests_sha256"]
@@ -321,7 +361,8 @@ def _sample_gate(
     if pair is None:
         return {"status": "not_measured_no_answerable_questions", "conditions": {}}
     arm = manifest["primary_arm"]
-    before, after = (reports[side]["summary"][arm] for side in SIDES)
+    before = reports["baseline"]["summary"][manifest.get("baseline_arm", arm)]
+    after = reports["candidate"]["summary"][arm]
     baseline_memory, candidate_memory = before["mean_memory_units"], after["mean_memory_units"]
     memory_ratio = candidate_memory / baseline_memory if baseline_memory else None
     failed_delta = after["failed_completion_rate"] - before["failed_completion_rate"]
@@ -338,6 +379,10 @@ def _sample_gate(
     }
     if refusal_pair is not None:
         conditions["no_observed_abstention_accuracy_regression"] = refusal_pair["difference"] >= 0
+    if manifest.get("comparison_kind") == "full-history":
+        conditions["complete_history_baseline_completed"] = all(
+            row["completed"] for row in reports["baseline"]["records"]
+        )
     return {
         "status": "sample_criteria_passed"
         if all(conditions.values())
@@ -390,6 +435,8 @@ def score_quality_comparison(
         "dataset_sha256": manifest["dataset_sha256"],
         "retrieval_sha256": manifest["retrieval_sha256"],
         "primary_arm": manifest["primary_arm"],
+        "baseline_arm": manifest.get("baseline_arm", manifest["primary_arm"]),
+        "comparison_kind": manifest.get("comparison_kind", "rendering"),
         "seed": manifest["seed"],
         "criteria": manifest["criteria"],
         "plans": reports,

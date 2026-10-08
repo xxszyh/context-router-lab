@@ -9,7 +9,7 @@ import typer
 from context_router.external.answer_runner import Stage, TokenLimitField, run_requests
 from context_router.external.longmemeval import write_report
 from context_router.external.longmemeval_answers import (
-    SUPPORTED_ARMS,
+    DEFAULT_ARMS,
     MemoryBudget,
     prepare_answer_plan,
     prepare_judge_requests,
@@ -32,19 +32,21 @@ def register_answer_commands(app: typer.Typer) -> None:
         candidate: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
         output: Path,
         arm: str = "joint",
+        comparison_kind: str = "rendering",
         seed: int = 20261007,
         minimum_accuracy_gain: Annotated[float, typer.Option(min=0, max=1)] = 0.0,
         maximum_failed_completion_increase: Annotated[float, typer.Option(min=0, max=1)] = 0.0,
         maximum_mean_memory_ratio: Annotated[float, typer.Option(min=0.01)] = 1.0,
         maximum_exact_mcnemar_p: Annotated[float, typer.Option(min=0, max=1)] = 0.05,
     ) -> None:
-        """Freeze one cross-rendering comparison and mix its public generation requests."""
+        """Freeze a rendering or full-history control comparison without model calls."""
         try:
             result = prepare_quality_comparison(
                 baseline,
                 candidate,
                 output,
                 arm=arm,
+                comparison_kind=comparison_kind,
                 seed=seed,
                 criteria=QualityCriteria(
                     minimum_accuracy_gain,
@@ -207,7 +209,7 @@ def register_answer_commands(app: typer.Typer) -> None:
         include_abstention: bool = False,
         rendering: str = LEGACY_RENDERING,
     ) -> None:
-        """Export dated, budgeted prompts. Makes no model calls."""
+        """Export dated prompts; --arm full_history opts into an uncapped control."""
         try:
             result = prepare_answer_plan(
                 dataset,
@@ -216,7 +218,7 @@ def register_answer_commands(app: typer.Typer) -> None:
                 budget=MemoryBudget(
                     memory_budget, tokenizer_file=tokenizer_file, model=tokenizer_model
                 ),
-                arms=tuple(arm or SUPPORTED_ARMS),
+                arms=tuple(arm or DEFAULT_ARMS),
                 limit=limit,
                 seed=seed,
                 include_abstention=include_abstention,

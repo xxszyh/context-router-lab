@@ -49,6 +49,14 @@ The real-data joint export contains 278 pairs, **556 requests**, all pending gen
 Mixed models/settings, missing judgments and self-judging are rejected; empty or
 truncated responses remain wrong. This inspected sample cannot authorize default promotion.
 
+The [complete-history control](docs/full-history-control-2026-10-08.md) now compares
+every unique source session, without clipping, against routed memory. It is an explicit
+single-arm control with a distinct comparison mode. Failed, empty or truncated baseline
+answers remain in the denominator and block a sample quality pass. A 20-pair real-data
+pilot has 40 pending requests; both inputs reproduce the source. Average memory is
+494,721 versus 10,595 characters. Model context capacity and final answer quality remain
+unverified; this size reduction is not evidence of better answers.
+
 > **The project is closed as a router and kept as a record.** The token half is established and
 > stronger than the claim; the quality half is a null result that the available judge could not have
 > resolved. Read **[`docs/termination-2026-10-02.md`](docs/termination-2026-10-02.md)** first: it

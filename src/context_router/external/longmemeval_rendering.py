@@ -18,7 +18,8 @@ from context_router.retrieval import BM25Index
 LEGACY_RENDERING = "equal-share-query-passages-v1"
 UNION_RENDERING = "chronological-union-v2"
 TURN_RENDERING = "whole-turn-bm25-v3"
-RENDERINGS = (LEGACY_RENDERING, UNION_RENDERING, TURN_RENDERING)
+FULL_HISTORY_RENDERING = "complete-history-v1"
+RENDERINGS = (LEGACY_RENDERING, UNION_RENDERING, TURN_RENDERING, FULL_HISTORY_RENDERING)
 PASSAGE_WORDS = 180
 PASSAGE_OVERLAP = 40
 PASSAGE_STRIDE = PASSAGE_WORDS - PASSAGE_OVERLAP
@@ -224,6 +225,28 @@ def render_memory(
         raise ValueError("unsupported memory rendering policy")
     if not sessions:
         return "", []
+    if policy == FULL_HISTORY_RENDERING:
+        # This control deliberately ignores the routed-memory cap. Preserve every
+        # source turn, including whitespace, in the supplied original session order.
+        chunks, audit = [], []
+        for slot, session in enumerate(sessions, 1):
+            source = index_session(session.turns)
+            chunks.append(f"[Memory {slot}; date {session.date}; excerpts]\n" + source.body)
+            audit.append(
+                {
+                    "slot": slot,
+                    "selection_unit": "complete_session",
+                    "used_window_fallback": False,
+                    "passages": list(range(len(session.turns))),
+                    "source_passages": len(session.turns),
+                    "source_words": len(source.words),
+                    "retained_word_ranges": [[0, len(source.words)]] if source.words else [],
+                    "retained_unique_words": len(source.words),
+                    "retained_word_occurrences": len(source.words),
+                    "duplicated_word_occurrences": 0,
+                }
+            )
+        return "\n\n".join(chunks), audit
     share = budget.maximum // len(sessions)
     chunks = []
     pending = []
