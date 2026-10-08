@@ -40,6 +40,8 @@ token_budget = [
 ]
 chat_budget = [
   "transformers>=4.51,<6",
+  # Transformers can load tokenizers without Jinja, but apply_chat_template needs it.
+  "jinja2>=3.1,<4",
 ]
 
 [project.scripts]

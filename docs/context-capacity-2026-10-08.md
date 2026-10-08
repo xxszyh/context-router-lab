@@ -13,6 +13,7 @@ ctxlab longmemeval-capacity-plan .local/comparison/generation.requests.jsonl .lo
 ~~~
 
 tokenizer-directory 必须已有 tokenizer_config.json、分词器文件和明确的聊天模板。
+chat_budget 显式安装 Transformers 和 Jinja2；分词器加载本身不保证模板渲染依赖已安装。
 命令只从本机加载分词器，不下载权重、不加载模型、不连接推理服务、不启用远程代码。
 无模板就报错，没有猜测格式的回退。设置 `tokenize=True`、`add_generation_prompt=True`、
 `truncation=False`、`padding=False`；也关闭分词器文件中存储的截断/填充设置。
@@ -98,3 +99,12 @@ KV 头、head_dim=128。普通、未量化 FP16 K/V 缓存的估计为：
 分词器，不下载模型：覆盖模板和输出预留、关闭存储截断、全请求阻断、过期计划、
 变更分词器、服务计数不符后停止、显式恢复、判分 policy-zero 和保留预检证据。
 CI 新增 chat_budget 依赖以确保这些用例实际运行。
+
+首次远端测试发现 Jinja2 依赖遗漏；本机原环境已有该库，未暴露安装问题。新建环境只
+安装声明的 extras 后，模板计数用例复现同一 ImportError。补齐 chat_budget 的 Jinja2
+依赖并构建 wheel，再在该环境安装 wheel/extras，pip check 通过，435 项测试通过，
+仅跳过未安装的可选 model2vec 测试；26 个容量用例均实际运行。环境没有 PyTorch，
+无需为了离线分词加载推理依赖。修复后的 wheel SHA-256 为
+`762875c602935e78f3d9666292455b7acd6b58f3591ca180a58934e77d0eac34`。
+从该环境实际安装的包重新计数 40 条真实请求，原生容量报告的 capacity_sha256 与
+此前完全一致，仍为 20 条超限、network_calls=0，未加载权重。
