@@ -7,6 +7,7 @@ from typing import Annotated
 import typer
 
 from context_router.external.answer_runner import Stage, TokenLimitField, run_requests
+from context_router.external.context_capacity import prepare_capacity_report
 from context_router.external.longmemeval import write_report
 from context_router.external.longmemeval_answers import (
     DEFAULT_ARMS,
@@ -26,6 +27,38 @@ from context_router.external.rendering_audit import audit_answer_plans
 
 
 def register_answer_commands(app: typer.Typer) -> None:
+    @app.command("longmemeval-capacity-plan")
+    def capacity_command(
+        requests: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+        output: Path,
+        tokenizer_directory: Annotated[Path, typer.Option(exists=True, file_okay=False)],
+        model: Annotated[str, typer.Option(help="Explicit generator or judge model/version")],
+        context_window: Annotated[int, typer.Option(min=1)],
+        max_output_tokens: Annotated[int, typer.Option(min=1)] = 256,
+        stage: str = "generation",
+    ) -> None:
+        """Count complete chat-template inputs locally; never load weights or make calls."""
+        if stage not in ("generation", "judge"):
+            raise typer.BadParameter("stage must be generation or judge")
+        try:
+            result = prepare_capacity_report(
+                requests,
+                output,
+                tokenizer_directory=tokenizer_directory,
+                model=model,
+                context_window=context_window,
+                max_output_tokens=max_output_tokens,
+                stage="generation" if stage == "generation" else "judge",
+                progress=lambda count: (
+                    typer.echo(f"Counted {count} requests") if count % 10 == 0 else None
+                ),
+            )
+        except (ValueError, ImportError, OSError) as error:
+            raise typer.BadParameter(str(error)) from error
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+        if not result["all_fit"]:
+            raise typer.Exit(code=1)
+
     @app.command("longmemeval-quality-plan")
     def quality_plan_command(
         baseline: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
@@ -163,6 +196,7 @@ def register_answer_commands(app: typer.Typer) -> None:
         temperature: Annotated[float, typer.Option(min=0, max=2)] = 0.0,
         token_limit_field: str = "max_completion_tokens",
         timeout: Annotated[float, typer.Option(min=0.01, max=60)] = 60.0,
+        capacity_report: Annotated[Path | None, typer.Option(exists=True, dir_okay=False)] = None,
     ) -> None:
         """Preview or explicitly execute a bounded local batch; journal every attempt."""
         if stage not in ("generation", "judge"):
@@ -188,6 +222,7 @@ def register_answer_commands(app: typer.Typer) -> None:
                 temperature=temperature,
                 token_limit_field=selected_limit,
                 timeout=timeout,
+                capacity_report=capacity_report,
             )
         except ValueError as error:
             raise typer.BadParameter(str(error)) from error

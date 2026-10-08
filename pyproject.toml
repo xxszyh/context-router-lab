@@ -38,6 +38,9 @@ rerank = [
 token_budget = [
   "tokenizers>=0.20,<1",
 ]
+chat_budget = [
+  "transformers>=4.51,<6",
+]
 
 [project.scripts]
 ctxlab = "context_router.cli:app"
@@ -78,6 +81,7 @@ module = [
   "huggingface_hub", "huggingface_hub.*",
   "sentence_transformers", "sentence_transformers.*",
   "tokenizers", "tokenizers.*",
+  "transformers", "transformers.*",
 ]
 ignore_missing_imports = true
 

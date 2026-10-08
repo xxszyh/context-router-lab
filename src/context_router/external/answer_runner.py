@@ -6,7 +6,6 @@ loopback endpoints only, and makes exactly one HTTP attempt per scheduled item.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import os
@@ -18,15 +17,21 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from context_router.external.batch_requests import Stage as Stage
+from context_router.external.batch_requests import policy_zero, read_requests, request_messages
+from context_router.external.context_capacity import validate_capacity_report
 from context_router.external.longmemeval_answers import object_hash
 from context_router.providers.pinned import require_pinned_model
 
-Stage = Literal["generation", "judge"]
 TokenLimitField = Literal["max_completion_tokens", "max_tokens"]
 
 
 class ResponseError(ValueError):
     """A provider replied, but not with the declared model/response contract."""
+
+
+class CapacityMismatchError(ResponseError):
+    """Observed token usage contradicts the preflight; stop the remaining batch."""
 
 
 def local_base_url(value: str) -> str:
@@ -43,43 +48,6 @@ def local_base_url(value: str) -> str:
     # Accessing port also validates its range and representation.
     _ = parsed.port
     return value.rstrip("/")
-
-
-def _requests(path: Path, stage: Stage) -> tuple[list[dict[str, Any]], str]:
-    data = path.read_bytes()
-    rows: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    required = (
-        {"request_id", "prompt_sha256", "instructions", "prompt"}
-        if stage == "generation"
-        else {"request_id", "answer_sha256", "prompt"}
-    )
-    allowed = required | ({"answer_completed", "answer_empty"} if stage == "judge" else set())
-    for line in data.decode("utf-8").splitlines():
-        if not line.strip():
-            continue
-        row = json.loads(line)
-        if not isinstance(row, dict) or not required <= row.keys() or row.keys() - allowed:
-            raise ValueError(
-                "request file has the wrong stage/schema; use the exported public requests"
-            )
-        if any(not isinstance(row[key], str) or not row[key] for key in required):
-            raise ValueError("request fields must be non-empty strings")
-        key = row["request_id"]
-        if key in seen:
-            raise ValueError("duplicate request_id")
-        if stage == "generation" and row["prompt_sha256"] != object_hash(
-            {"instructions": row["instructions"], "prompt": row["prompt"]}
-        ):
-            raise ValueError("generation prompt failed its hash check")
-        for field in ("answer_completed", "answer_empty"):
-            if field in row and type(row[field]) is not bool:
-                raise ValueError("completion flags must be JSON booleans")
-        rows.append(row)
-        seen.add(key)
-    if not rows:
-        raise ValueError("request file is empty")
-    return rows, hashlib.sha256(data).hexdigest()
 
 
 def _response(response: httpx.Response, model: str) -> tuple[str, str, int | None, int | None]:
@@ -172,6 +140,7 @@ def run_requests(
     timeout: float = 60.0,
     client: httpx.Client | None = None,
     progress: Callable[[int], None] | None = None,
+    capacity_report: Path | None = None,
 ) -> dict[str, Any]:
     if stage not in ("generation", "judge") or token_limit_field not in (
         "max_tokens",
@@ -186,7 +155,7 @@ def run_requests(
         raise ValueError("retry-failures requires resume")
     base_url = local_base_url(base_url)
     model = require_pinned_model(model)
-    requests, digest = _requests(source, stage)
+    requests, digest = read_requests(source, stage)
     checkpoint = output.with_name(output.name + ".checkpoint.jsonl")
     if source.resolve() in {
         output.resolve(),
@@ -194,6 +163,23 @@ def run_requests(
         output.with_name(output.name + ".tmp").resolve(),
     }:
         raise ValueError("batch output must not overwrite its request source")
+    capacity_digest = None
+    token_counts: dict[str, int] = {}
+    if capacity_report is not None:
+        if capacity_report.resolve() in {
+            output.resolve(),
+            checkpoint.resolve(),
+            output.with_name(output.name + ".tmp").resolve(),
+        }:
+            raise ValueError("batch output must not overwrite its capacity report")
+        capacity_digest, token_counts = validate_capacity_report(
+            capacity_report,
+            requests,
+            requests_sha256=digest,
+            stage=stage,
+            model=model,
+            max_output_tokens=max_output_tokens,
+        )
     settings = {
         "temperature": temperature,
         "max_output_tokens": max_output_tokens,
@@ -202,6 +188,8 @@ def run_requests(
         "stream": False,
         "protocol": "chat_completions",
     }
+    if capacity_digest is not None:
+        settings["capacity_report_sha256"] = capacity_digest
     configuration = {
         "implementation": "local-answer-batch-v1",
         "requests_sha256": digest,
@@ -256,10 +244,7 @@ def run_requests(
             try:
                 for request in pending:
                     key = request["request_id"]
-                    zero = stage == "judge" and (
-                        request.get("answer_completed") is False
-                        or request.get("answer_empty") is True
-                    )
+                    zero = policy_zero(request, stage)
                     if not zero and calls >= max_requests:
                         break
                     started = time.perf_counter()
@@ -278,18 +263,11 @@ def run_requests(
                             }
                         else:
                             calls += 1
-                            instructions = request.get(
-                                "instructions",
-                                "Grade the provided candidate. Return only yes or no.",
-                            )
                             response = active_client.post(
                                 base_url + "/chat/completions",
                                 json={
                                     "model": model,
-                                    "messages": [
-                                        {"role": "system", "content": instructions},
-                                        {"role": "user", "content": request["prompt"]},
-                                    ],
+                                    "messages": request_messages(request),
                                     "temperature": temperature,
                                     token_limit_field: max_output_tokens,
                                     "n": 1,
@@ -297,6 +275,10 @@ def run_requests(
                                 },
                             )
                             text, reason, input_tokens, output_tokens = _response(response, model)
+                            if capacity_digest is not None and input_tokens != token_counts[key]:
+                                raise CapacityMismatchError(
+                                    "service input-token usage does not match capacity preflight"
+                                )
                             if stage == "generation":
                                 record = {
                                     "request_id": key,
@@ -364,6 +346,8 @@ def run_requests(
                     latest[key] = event
                     if progress is not None:
                         progress(len(latest))
+                    if failure is not None and failure["kind"] == "CapacityMismatchError":
+                        break
             finally:
                 _snapshot(output, requests, latest)
     finally:

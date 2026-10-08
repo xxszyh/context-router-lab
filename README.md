@@ -57,6 +57,15 @@ pilot has 40 pending requests; both inputs reproduce the source. Average memory 
 494,721 versus 10,595 characters. Model context capacity and final answer quality remain
 unverified; this size reduction is not evidence of better answers.
 
+[Chat-template capacity preflight](docs/context-capacity-2026-10-08.md) now counts
+the complete system/user input and assistant prefix with a local tokenizer,
+reserves output tokens and binds a report to the complete request file. The optional
+runner guard blocks all calls on overflow and stops if reported service input usage
+differs. The 20-pair tokenizer probe needs 104,348–108,031 tokens for full history
+versus 2,069–2,864 for routed inputs: a 32k capacity blocks every full-history
+request, while a 131k assumption fits all inputs. These are local counts; service
+configuration, memory, speed, generation and answer quality still require validation.
+
 > **The project is closed as a router and kept as a record.** The token half is established and
 > stronger than the claim; the quality half is a null result that the available judge could not have
 > resolved. Read **[`docs/termination-2026-10-02.md`](docs/termination-2026-10-02.md)** first: it
