@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
 from collections.abc import Sequence
 from typing import Protocol
 
 from context_router.retrieval import LexicalAnalyzer
+
+DEFAULT_STATIC_MODEL = "minishlab/potion-base-8M"
+DEFAULT_STATIC_REVISION = "bf8b056651a2c21b8d2565580b8569da283cab23"
 
 
 class EmbeddingProvider(Protocol):
@@ -134,9 +138,10 @@ class StaticNeuralEmbeddingProvider:
 
     def __init__(
         self,
-        model: str = "minishlab/potion-base-8M",
+        model: str = DEFAULT_STATIC_MODEL,
         *,
         analyzer: LexicalAnalyzer | None = None,
+        revision: str | None = None,
     ) -> None:
         try:
             from model2vec import StaticModel
@@ -145,8 +150,19 @@ class StaticNeuralEmbeddingProvider:
                 "the neural embedder needs the optional extra: pip install -e '.[neural]'"
             ) from error
         self.analyzer = analyzer or LexicalAnalyzer()
-        self._model = StaticModel.from_pretrained(model)
-        self.model_version = f"static-neural:{model}"
+        model_path = model
+        if revision is not None:
+            if not re.fullmatch(r"[0-9a-f]{40}", revision):
+                raise ValueError("embedding revision must be an immutable 40-character commit")
+            from huggingface_hub import snapshot_download
+
+            model_path = snapshot_download(
+                model,
+                revision=revision,
+                allow_patterns=["config.json", "model.safetensors", "tokenizer.json"],
+            )
+        self._model = StaticModel.from_pretrained(model_path, force_download=False)
+        self.model_version = f"static-neural:{model}" + (f"@{revision}" if revision else "")
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:

@@ -64,6 +64,8 @@ from context_router.evaluation.necessity import (
     required_from_ablations,
     run_ablations,
 )
+from context_router.external.answers_cli import register_answer_commands
+from context_router.external.longmemeval import HARD_TYPES, evaluate_longmemeval, write_report
 from context_router.external.scale_qa import (
     STRATA_BASELINE,
     WINDOW_SIZES,
@@ -92,6 +94,15 @@ from context_router.providers.anthropic import (
     AnthropicCompatibleAnswerProvider,
     AnthropicCompatibleVerdictModel,
 )
+from context_router.providers.embedding import (
+    DEFAULT_STATIC_REVISION,
+    StaticNeuralEmbeddingProvider,
+)
+from context_router.providers.reranking import (
+    DEFAULT_RERANK_MODEL,
+    DEFAULT_RERANK_REVISION,
+    CrossEncoderScorer,
+)
 from context_router.retrieval import BM25Index, LexicalAnalyzer
 from context_router.routing import ContextRouter
 from context_router.routing.calibration import PlattContextRanker
@@ -100,6 +111,66 @@ from context_router.routing.router import RoutingPolicy
 from context_router.storage import SQLiteEventStore
 
 app = typer.Typer(no_args_is_help=True, help="Context routing research harness.")
+register_answer_commands(app)
+
+
+@app.command("longmemeval")
+def longmemeval_command(
+    dataset: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    output: Path,
+    depth: Annotated[int, typer.Option(min=1, max=20)] = 5,
+    limit: Annotated[int | None, typer.Option(min=1)] = None,
+    embedder: Annotated[
+        str, typer.Option(help="hash (offline) or neural (optional weights)")
+    ] = "hash",
+    question_type: Annotated[list[str] | None, typer.Option()] = None,
+    top_per_retriever: Annotated[int, typer.Option(min=1)] = 10,
+    max_candidates: Annotated[int, typer.Option(min=1)] = 20,
+    rerank: bool = False,
+    reranker_model: str = DEFAULT_RERANK_MODEL,
+    reranker_revision: str = DEFAULT_RERANK_REVISION,
+    passages_per_session: Annotated[int, typer.Option(min=1)] = 2,
+    seed: int = 20260420,
+    resume: bool = False,
+    embedding_revision: str = DEFAULT_STATIC_REVISION,
+    include_abstention: bool = False,
+    abstention_only: bool = False,
+) -> None:
+    """Measure required sessions, candidate loss, and paired ordering gains."""
+    if dataset.resolve() == output.resolve():
+        raise typer.BadParameter("output must not overwrite the source dataset")
+    if embedder not in ("hash", "neural"):
+        raise typer.BadParameter("embedder must be hash or neural")
+    provider = (
+        StaticNeuralEmbeddingProvider(revision=embedding_revision)
+        if embedder == "neural"
+        else HashEmbeddingProvider()
+    )
+    scorer = CrossEncoderScorer(reranker_model, revision=reranker_revision) if rerank else None
+    try:
+        result = evaluate_longmemeval(
+            dataset,
+            provider,
+            depth=depth,
+            limit=limit,
+            types=tuple(question_type or HARD_TYPES),
+            policy=RoutingPolicy(
+                top_per_retriever=top_per_retriever, max_candidates=max_candidates
+            ),
+            scorer=scorer,
+            passages_per_session=passages_per_session,
+            seed=seed,
+            checkpoint=output.with_suffix(".checkpoint.jsonl"),
+            resume=resume,
+            include_abstention=include_abstention,
+            abstention_only=abstention_only,
+            progress=lambda count: typer.echo(f"  evaluated {count}") if count % 25 == 0 else None,
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    write_report(output, result)
+    typer.echo(json.dumps(result["summary"], ensure_ascii=False, indent=2))
+    typer.echo("Answer quality: not measured. These are session retrieval metrics.")
 
 
 def _write_json(path: Path, value: object) -> None:

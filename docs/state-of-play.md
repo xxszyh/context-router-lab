@@ -1,5 +1,10 @@
 # State of play
 
+**Current maintenance entry, 2026-10-07:**
+[portable LongMemEval evaluation and the next quality gate](maintenance-2026-10-07.md).
+The numbered findings below are historical notes; consult the termination
+statement and its amendments for later withdrawals and corrections.
+
 One page to pick this project up. Everything below is measured, and each claim names the
 evidence grade, because several of them are weaker than their numbers look.
 

@@ -14,6 +14,58 @@ The project does not try to be another memory OS or vector-RAG framework. It exi
 measure whether **selective context assembly** is worth building at all, and only then to
 build it.
 
+**Maintenance resumed, 2026-10-07.** The historical research verdict below is
+preserved. The external LongMemEval experiment now has a portable, tested CLI,
+paired all-gold metrics, interruption-safe checkpoints, and an optional pinned
+joint query-passage reranker. See
+[the maintenance plan and reproduction commands](docs/maintenance-2026-10-07.md).
+Generated-answer quality remains unestablished; session retrieval is measured separately.
+
+The first [full external reranking run](docs/longmemeval-joint-2026-10-07.md)
+raises all-gold session recall from **68.3% to 81.7%** on 278 answerable questions,
+with 44 paired wins against 7 losses. The scorer stays opt-in pending an
+end-to-end answer-quality gate.
+
+The [offline answer-quality exchange](docs/answer-exchange-2026-10-07.md) now
+exports dated, budgeted generation inputs, separate blinded judging requests,
+and complete-set paired accuracy reports. It makes no model calls and reports
+quality as unmeasured until real answers and independent judgments are imported.
+An opt-in local batch runner now previews by default, supports durable resume and
+explicit failure retries, and validates model identity and completion status.
+Abstention experiments keep their own denominators and never inflate retrieval recall.
+
+[Rendered-evidence auditing](docs/rendering-audit-2026-10-07.md) now reconstructs
+archived prompts and separates session-retrieval misses from losses during budgeted
+rendering. An opt-in chronological union removes overlapping source spans while
+keeping within-session order. This measures annotated-span retention, not answer accuracy.
+Whole-turn BM25 selection raises strict retention from **44.35% to 70.56%** for the
+joint arm's 248 annotation-eligible questions, with 70 paired wins and five losses;
+30 unknown-annotation questions remain explicit. All new renderers stay opt-in.
+
+The [cross-rendering quality comparison](docs/quality-comparison-2026-10-07.md)
+now freezes one primary arm, matched inputs and sample criteria, mixes both policies'
+generation and blinded judging batches, and aligns paired answer scores by question ID.
+The real-data joint export contains 278 pairs, **556 requests**, all pending generation.
+Mixed models/settings, missing judgments and self-judging are rejected; empty or
+truncated responses remain wrong. This inspected sample cannot authorize default promotion.
+
+The [complete-history control](docs/full-history-control-2026-10-08.md) now compares
+every unique source session, without clipping, against routed memory. It is an explicit
+single-arm control with a distinct comparison mode. Failed, empty or truncated baseline
+answers remain in the denominator and block a sample quality pass. A 20-pair real-data
+pilot has 40 pending requests; both inputs reproduce the source. Average memory is
+494,721 versus 10,595 characters. Model context capacity and final answer quality remain
+unverified; this size reduction is not evidence of better answers.
+
+[Chat-template capacity preflight](docs/context-capacity-2026-10-08.md) now counts
+the complete system/user input and assistant prefix with a local tokenizer,
+reserves output tokens and binds a report to the complete request file. The optional
+runner guard blocks all calls on overflow and stops if reported service input usage
+differs. The 20-pair tokenizer probe needs 104,348–108,031 tokens for full history
+versus 2,069–2,864 for routed inputs: a 32k capacity blocks every full-history
+request, while a 131k assumption fits all inputs. These are local counts; service
+configuration, memory, speed, generation and answer quality still require validation.
+
 > **The project is closed as a router and kept as a record.** The token half is established and
 > stronger than the claim; the quality half is a null result that the available judge could not have
 > resolved. Read **[`docs/termination-2026-10-02.md`](docs/termination-2026-10-02.md)** first: it
@@ -83,6 +135,21 @@ assemble_context(request: AssemblyRequest, decision: RouteDecision) -> WorkingCo
 ```
 
 ## Install
+
+Optional neural retrieval and joint reranking:
+
+~~~sh
+python -m pip install -e ".[dev]"
+ctxlab longmemeval datasets/fixtures/longmemeval-smoke.json .local/smoke.json
+python -m pip install -e ".[dev,neural,rerank]"
+ctxlab longmemeval /path/to/longmemeval_s_cleaned.json .local/lme.json --embedder neural
+ctxlab longmemeval /path/to/longmemeval_s_cleaned.json .local/joint.json --embedder neural --rerank
+~~~
+
+Use --limit 30 for a first smoke test and --resume to continue an interrupted
+run. The reports explicitly mark answer quality as not measured.
+The included fixture is fictional and only tests the workflow; it is not
+benchmark evidence.
 
 ```bash
 python -m venv .venv

@@ -1,0 +1,20 @@
+name: Checks
+on: [push, pull_request]
+jobs:
+  tests:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.11', '3.13']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e ".[dev,token_budget,chat_budget]"
+      - run: python -m pytest
+      - run: python -m ruff check src tests
+      - run: python -m ruff format --check src tests
+      - if: matrix.python == '3.13'
+        run: python -m mypy src tests
